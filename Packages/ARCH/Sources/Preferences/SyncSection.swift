@@ -2,6 +2,7 @@
 import Browsing
 import SwiftUI
 import Sync
+import Browsing
 
 /// What Settings ▸ Sync shows and allows, worked out from the sync controller's state.
 struct SyncSectionState: Equatable {
@@ -58,6 +59,12 @@ struct SyncSection: View {
                 }))
                 .disabled(!state.canToggle)
                 Text(RemoteTabsStrings.explanation)
+                    .font(.callout).foregroundStyle(.secondary)
+                Toggle(PluginSyncLabels.toggle, isOn: Binding(get: { controller.isPluginsEnabled }, set: { value in
+                    Task { await controller.setPluginsEnabled(value) }
+                }))
+                .disabled(!state.isOn || !state.canToggle)
+                Text(PluginSyncLabels.explanation)
                     .font(.callout).foregroundStyle(.secondary)
                 Toggle(RemoteTabsStrings.showTabs, isOn: Binding(get: { controller.showRemoteTabs }, set: { value in
                     controller.setShowRemoteTabs(value)

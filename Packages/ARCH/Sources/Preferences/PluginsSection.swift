@@ -164,6 +164,10 @@ private struct PluginList: View {
         .onReceive(PluginsRequests.shared.$pending) { answer($0) }
         .onChange(of: isBusy, initial: true) { listIsBusy = $1 }
         .onChange(of: isBusy) { answer(PluginsRequests.shared.pending) }
+        ForEach(plugins.pendingSyncItems) { item in
+            SyncedPluginRow(session: session, sync: session.pluginSync, plugins: plugins, item: item,
+                            isBusy: isBusy, choosePackage: { choosePackage(for: item) })
+        }
         ForEach(plugins.plugins.filter { plugins.leadVersion(of: $0.id)?.id == $0.id }) { plugin in
             PluginSection(session: session, plugins: plugins, personaID: personaID, plugin: plugin, reviewUpdate: reviewUpdate(of:),
                           installVersion: { installVersion(of: $0, for: $1, from: $2, space: nil) },
@@ -246,6 +250,10 @@ private struct PluginList: View {
 
     /// Asks for a package with an open panel on the Settings window, then stages it for the review sheet.
     private func choosePackage() {
+        choosePackage(for: nil)
+    }
+
+    private func choosePackage(for syncedItem: PluginSyncItem?) {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = true
@@ -259,7 +267,18 @@ private struct PluginList: View {
             }
             Task {
                 do {
-                    showSheet(.review(PluginReview(package: try await plugins.stage(url))), space: nil)
+                    let package: PluginPackage
+                    switch syncedItem?.source {
+                    case .webStore(let identifier): package = try await plugins.stage(url, origin: .webStore(identifier))
+                    case .url(let source): package = try await plugins.stage(url, origin: .file(source))
+                    case nil: package = try await plugins.stage(url)
+                    }
+                    if let syncedItem {
+                        defer { plugins.discard(package) }
+                        try plugins.installSynced(package, for: syncedItem)
+                    } else {
+                        showSheet(.review(PluginReview(package: package)), space: nil)
+                    }
                 } catch {
                     failure = error.localizedDescription
                 }
@@ -270,6 +289,47 @@ private struct PluginList: View {
             panel.beginSheetModal(for: window, completionHandler: finish)
         } else {
             panel.begin(completionHandler: finish)
+        }
+    }
+}
+
+/// A synced install whose package is absent on this Mac.
+private struct SyncedPluginRow: View {
+    let session: BrowserSession
+    @ObservedObject var sync: PluginSyncCoordinator
+    @ObservedObject var plugins: PluginManager
+    let item: PluginSyncItem
+    let isBusy: Bool
+    let choosePackage: () -> Void
+    @State private var failure: String?
+
+    var body: some View {
+        Section {
+            LabeledContent {
+                if sync.installing[plugins.persona]?.contains(item.id) == true {
+                    ProgressView().controlSize(.small)
+                    Text(PluginSyncLabels.installing).foregroundStyle(.secondary)
+                } else {
+                    Button(PluginSyncLabels.install, action: choosePackage).disabled(isBusy)
+                    if item.source != nil {
+                        Button(PluginSyncLabels.retry) { session.retryPluginSync(item, in: plugins.persona) }
+                            .disabled(!sync.isActive)
+                    }
+                }
+            } label: {
+                Text(item.name)
+                if let engine = item.engine.flatMap(EngineKind.init(rawValue:)) {
+                    Text(engine.displayName).foregroundStyle(.secondary)
+                }
+            }
+            Button(PluginSyncLabels.remove, role: .destructive) {
+                do { try plugins.applySyncItems([], deleting: [item.id]) }
+                catch { failure = error.localizedDescription }
+            }
+        } footer: {
+            if let message = failure ?? sync.failures[plugins.persona]?[item.id] {
+                Text(message).font(.callout).foregroundStyle(.red)
+            }
         }
     }
 }

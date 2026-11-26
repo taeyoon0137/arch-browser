@@ -332,6 +332,25 @@ private final class RecordingHost: PluginBrowserHost {
         await #expect(throws: PluginError.stopped) { _ = try await client.reply(request) }
     }
 
+    @Test func restoredPluginsRegisterTheirAIModelChoicesBeforeAnySettingsChange() async throws {
+        let service = service()
+        let first = manager(ai: service)
+        let package = try await first.stage(try writePackage([
+            "plugin.json": #"{"id":"org.example.restored-ai","name":"Restored AI","version":"1","apiVersion":1,"summary":"Asks.","permissions":["ai"]}"#,
+        ]))
+        try first.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: true)
+        let id = AIFeatureID.plugin(package.manifest.id.rawValue)
+        #expect(service.features.contains { $0.id == id })
+        first.close()
+        #expect(!service.features.contains { $0.id == id })
+
+        let restored = manager(ai: service)
+        #expect(restored.plugins.first?.isEnabled == true)
+        #expect(service.features.first { $0.id == id }?.name == "Restored AI")
+        restored.close()
+        #expect(!service.features.contains { $0.id == id })
+    }
+
     @Test func eachPersonasPluginsShareTheFeatureWhichListedEventsMakeAutomatic() throws {
         let service = service()
         let id = AIFeatureID.plugin(AIHookPlugin.id.rawValue)

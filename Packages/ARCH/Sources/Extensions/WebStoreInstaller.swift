@@ -41,12 +41,13 @@ public final class WebStoreInstaller: ObservableObject {
     // MARK: Installing
 
     /// Downloads the current package of the extension `id`, an identifier as `WebStore.extensionID(from:)` reads it, and stages it in the Persona of `plugins` with the origin `webStore(id)`, for the review. Throws `WebStoreError` when the store offers no package, when the Persona has the store's current version installed from the store, which downloads nothing, and when the download fails its checks; `PluginError` when staging refuses the package, and `PluginError.closed`, without asking or downloading, once the session has closed `plugins` as it deleted the Persona; and the system's error when the network fails. Cancelling the task throws `CancellationError` at whatever step it comes: it stops the request or the download, and a package that staging finished meanwhile is discarded. The downloaded file is deleted once the package is staged or refused, and on every failure.
-    public func stage(_ id: String, in plugins: PluginManager) async throws -> PluginPackage {
+    /// Sync sets `includingInstalledVersion` when an entry for another engine needs the same release.
+    public func stage(_ id: String, in plugins: PluginManager, includingInstalledVersion: Bool = false) async throws -> PluginPackage {
         try await staged(in: plugins) {
             guard let id = WebStore.identifier(id) else { throw WebStoreError.unknownExtension(id) }
             guard !plugins.isClosed else { throw PluginError.closed }
             let release = try await currentRelease(of: id)
-            if let installed = plugins.plugins.first(where: { $0.origin == .webStore(id) && $0.manifest.version == release.version }) {
+            if !includingInstalledVersion, let installed = plugins.plugins.first(where: { $0.origin == .webStore(id) && $0.manifest.version == release.version }) {
                 throw WebStoreError.alreadyInstalled(name: installed.manifest.name, version: release.version)
             }
             return try await downloadAndStage(release, in: plugins)

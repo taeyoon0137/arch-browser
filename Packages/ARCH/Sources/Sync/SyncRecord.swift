@@ -9,10 +9,9 @@ public enum SyncRecordType: String, CaseIterable, Hashable, Sendable {
     case favorite = "Favorite"
     case tab = "Tab"
     case setting = "Setting"
+    case plugin = "Plugin"
     case remoteTabs = "RemoteTabs"
     case siteRule = "SiteRule"
-
-    public var isSidebar: Bool { self != .setting && self != .remoteTabs }
 
     /// The fields this build reads and writes for the type. Any other field in a record came from a newer build, or from an older build, as a removed live folder's `live` does, and this build keeps it unchanged (`docs/sync.md`, Schema versions).
     public var fields: Set<SyncField> {
@@ -23,10 +22,14 @@ public enum SyncRecordType: String, CaseIterable, Hashable, Sendable {
         case .favorite: [.persona, .url, .title, .order]
         case .tab: [.persona, .space, .folder, .url, .title, .customTitle, .engine, .order]
         case .setting: [.value]
+        case .plugin: [.persona, .pluginID, .manifestID, .name, .kind, .source, .enabled, .settings, .grant, .engine, .counterpartID]
         case .remoteTabs: [.persona, .space, .deviceID, .deviceName, .tabs]
         case .siteRule: [.host, .pathPrefix, .persona, .space, .window]
         }
     }
+
+    /// Records in the sidebar graph; settings, plugins, and remote tabs are applied separately.
+    public var isSidebar: Bool { self != .setting && self != .plugin && self != .remoteTabs }
 
     /// Fields that only make sense together, so the merge treats each group as one unit (`docs/sync.md`, Conflicts; sync decision 3): a pinned tab's or folder's place, and a saved page. Every other field is a unit of its own.
     public var fieldGroups: [Set<SyncField>] {
@@ -34,6 +37,7 @@ public enum SyncRecordType: String, CaseIterable, Hashable, Sendable {
         case .folder: [[.space, .parent, .order]]
         case .favorite: [[.url, .title]]
         case .tab: [[.space, .folder, .order], [.url, .title]]
+        case .plugin: [[.pluginID, .manifestID, .kind, .source, .grant, .engine, .counterpartID]]
         case .remoteTabs: [[.persona, .space, .deviceID, .deviceName, .tabs]]
         case .siteRule: [[.host, .pathPrefix], [.persona, .space, .window]]
         case .persona, .space, .setting: []
@@ -57,6 +61,14 @@ public enum SyncField: String, CaseIterable, Hashable, Sendable {
     case engine
     case order
     case value
+    case pluginID
+    case manifestID
+    case kind
+    case source
+    case enabled
+    case settings
+    case grant
+    case counterpartID
     case deviceID
     case deviceName
     case tabs

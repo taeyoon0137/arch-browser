@@ -415,9 +415,11 @@ private final class AIPageCallsPlugin: PageCallsPlugin {
               const read = () => outcome(() => arch.pages.run(invocation.tab.id, "read.js"));
               await arch.storage.set("twice", [await read(), await read()]);
             });
+            // Keep the resolver reachable so WebKit waits for the hang limit instead of reporting a collected promise.
+            const unanswered = [];
             arch.commands.onRun("unanswered", async (invocation) => {
               await arch.storage.set("unanswered", await outcome(() => arch.pages.run(invocation.tab.id, "read.js")));
-              await new Promise(() => {});
+              await new Promise((resolve) => unanswered.push(resolve));
             });
             """,
             "read.js": "return { href: location.href, sends: typeof arch.send };",

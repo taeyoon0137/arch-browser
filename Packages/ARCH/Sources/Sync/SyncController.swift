@@ -8,6 +8,8 @@ import Foundation
 /// Coordinates account availability, local sidebar saves, and CloudKit sync engine events.
 @MainActor public final class SyncController: ObservableObject {
     public static let enabledKey = "ARCHSyncEnabled"
+    public static let pluginsEnabledKey = "ARCHSyncPluginsEnabled"
+    @Published public private(set) var isPluginsEnabled: Bool
     public static let showRemoteTabsKey = "ARCHShowRemoteTabs"
     static let remoteDeviceIDKey = "ARCHRemoteTabsDeviceID"
     static let remoteCleanupKey = "ARCHRemoteTabsCleanupPending"
@@ -28,6 +30,7 @@ import Foundation
     public let settings: SyncedSettings
 
     private let sidebar: any SyncedSidebar
+    private let plugins: (any SyncedPlugins)?
     private let defaults: UserDefaults
     private let url: URL
     private let check: () async -> SyncAvailability.Status
@@ -84,9 +87,9 @@ import Foundation
     /// The unapplied mirror records that this launch's first fetch applies as if fetched (`SyncMirror.unapplied`).
     private var reapplying = Set<String>()
 
-    public convenience init(sidebar: any SyncedSidebar, directory: URL, defaults: UserDefaults = .standard) {
+    public convenience init(sidebar: any SyncedSidebar, plugins: (any SyncedPlugins)? = nil, directory: URL, defaults: UserDefaults = .standard) {
         let availability = SyncAvailability()
-        self.init(sidebar: sidebar, directory: directory, defaults: defaults, check: availability.check,
+        self.init(sidebar: sidebar, plugins: plugins, directory: directory, defaults: defaults, check: availability.check,
                   factory: { CloudKitSyncEngine(database: $0, stateSerialization: $1, delegate: $2) })
         if let entitlement = availability.entitledDatabase() {
             accountContainer = { CKContainer(identifier: entitlement.containerIdentifier) }
@@ -96,11 +99,12 @@ import Foundation
         }
     }
 
-    init(sidebar: any SyncedSidebar, directory: URL, defaults: UserDefaults,
+    init(sidebar: any SyncedSidebar, plugins: (any SyncedPlugins)? = nil, directory: URL, defaults: UserDefaults,
          notifications: NotificationCenter = .default, check: @escaping () async -> SyncAvailability.Status,
          factory: @escaping SyncEngineFactory, now: @escaping () -> Date = Date.init,
          remoteDebounce: Duration = .seconds(10), remoteDeviceName: @escaping () -> String = { Host.current().localizedName ?? "Mac" }) {
         self.sidebar = sidebar
+        self.plugins = plugins
         self.defaults = defaults
         self.notifications = notifications
         self.check = check
@@ -114,6 +118,7 @@ import Foundation
         url = directory.appendingPathComponent(SyncMirror.fileName)
         settings = SyncedSettings(defaults: defaults)
         isEnabled = defaults.bool(forKey: Self.enabledKey)
+        isPluginsEnabled = defaults.object(forKey: Self.pluginsEnabledKey) as? Bool ?? true
         offReason = defaults.string(forKey: Self.offReasonKey).flatMap(SyncOffReason.init(rawValue:))
         if defaults.bool(forKey: Self.applyingKey) {
             // Settings ▸ Sync shows the reason at every launch until sync is turned on again.
@@ -131,6 +136,7 @@ import Foundation
     /// Only while an engine runs, so that a session save with sync off builds no projection.
     private func observeSidebarSaves() {
         sidebar.onSidebarSyncSave = { [weak self] state in self?.sidebarSaved(state) }
+        plugins?.onPluginSyncChange = { [weak self] in self?.pluginsChanged() }
         sidebar.onOpenTabsSyncSave = { [weak self] state in
             guard let self, !applying else { return }
             scheduleRemoteTabs(state)
@@ -167,6 +173,7 @@ import Foundation
             remoteCleanup = nil
         }
         updateEnabled(enabled)
+        if !enabled { plugins?.setPluginSyncActive(false) }
         if enabled { await refresh() } else {
             checkNumber += 1
             isCheckingAvailability = false
@@ -207,6 +214,7 @@ import Foundation
     public func deleteCloudData() async {
         guard let engine, isEnabled, !isDeletingCloudData else { return }
         isDeletingCloudData = true
+        plugins?.setPluginSyncActive(false)
         lastError = nil
         defaults.set(true, forKey: Self.deletionRequestedKey)
         engine.add([.deleteZone])
@@ -312,6 +320,14 @@ import Foundation
             let delegate = Delegate(self)
             self.delegate = delegate
             engine = factory(target, mirror.engineState, delegate)
+            if !isPluginsEnabled || plugins == nil, let engine {
+                engine.remove(engine.pendingChanges.filter {
+                    switch $0 {
+                    case .saveRecord(let name), .deleteRecord(let name): name.hasPrefix("plugin.")
+                    case .saveZone, .deleteZone: false
+                    }
+                })
+            }
             let oldRemoteSaves = mirror.pendingSaves.filter { RemoteTabsRecords.owns($0, deviceID: remoteDeviceID) }
             remoteDeletionCandidates.formUnion((bases.filter { RemoteTabsRecords.owns($0, deviceID: remoteDeviceID) } + oldRemoteSaves).map(\.recordName))
             engine?.remove(oldRemoteSaves.map { .saveRecord($0.recordName) })
@@ -347,6 +363,8 @@ import Foundation
     private func detach() -> (any SyncEngineClient)? {
         let previous = engine
         sidebar.onSidebarSyncSave = nil
+        plugins?.onPluginSyncChange = nil
+        plugins?.setPluginSyncActive(false)
         sidebar.onOpenTabsSyncSave = nil
         sidebar.remoteTabGroups = []
         remoteDebounceTask?.cancel()
@@ -407,6 +425,7 @@ import Foundation
     /// Builds a pending record only after the first fetch and outside an apply or deletion.
     func record(toSave name: String) -> CKRecord? {
         guard canSendRecords, let save = mirror.pendingSaves.first(where: { $0.recordName == name }) else { return nil }
+        guard save.recordType != .plugin || isPluginsEnabled && plugins != nil else { return nil }
         let base = mirror.records[name]
         guard base.map({ $0.recordType == save.recordType.rawValue }) ?? true else { return nil }
         return SyncCloudKitRecords.ckRecord(from: save, base: base)
@@ -444,8 +463,115 @@ import Foundation
         durableSidebar = state
         do {
             try compareSidebar(state)
+            try comparePlugins()
             if canSendRecords { persist() }
         } catch { lastError = localized("The saved sidebar could not be compared.") }
+    }
+
+    /// Pausing plugin sync keeps installations and cloud records. The mirror saves incoming
+    /// records and tombstones to apply before publishing resumes.
+    public func setPluginsEnabled(_ enabled: Bool) async {
+        guard isPluginsEnabled != enabled, !isDeletingCloudData else { return }
+        isPluginsEnabled = enabled
+        defaults.set(enabled, forKey: Self.pluginsEnabledKey)
+        plugins?.setPluginSyncActive(false)
+        guard let engine else { return }
+        let pluginRows = bases.filter { $0.recordType == .plugin }
+        mirror.unapplied.formUnion(pluginRows.map(\.recordName))
+        let names = Set((pluginRows + mirror.pendingSaves.filter { $0.recordType == .plugin }).map(\.recordName))
+        engine.remove(engine.pendingChanges.filter {
+            switch $0 {
+            case .saveRecord(let name), .deleteRecord(let name): return names.contains(name) || name.hasPrefix("plugin.")
+            case .saveZone, .deleteZone: return false
+            }
+        })
+        if canSendRecords { persist() }
+        if enabled {
+            for row in pluginRows {
+                reapplying.insert(row.recordName)
+                fetched[row.recordName] = mirror.records[row.recordName]
+            }
+            await requestFetch()
+        }
+    }
+
+    private func pluginRecords(at date: Date) throws -> [SyncRecord] {
+        guard let plugins else { return [] }
+        return try PluginRecords.records(from: plugins.pluginSyncItems, foundAt: date)
+    }
+
+    /// Called only after saving the plugin list or settings. Installation progress leaves outgoing
+    /// records unchanged: pending installs already have records for their desired state.
+    private func pluginsChanged() {
+        guard engine != nil, isPluginsEnabled, !applying else { return }
+        do {
+            try comparePlugins()
+            if canSendRecords { persist() }
+        } catch { lastError = localized("The saved sidebar could not be compared.") }
+    }
+
+    private func shouldHoldPlugin(_ record: SyncRecord) -> Bool {
+        guard isPluginsEnabled, plugins != nil, PluginRecords.item(from: record) != nil else { return true }
+        if case .reference(let owner) = record[.persona] {
+            let current = mirror.records.merging(fetched) { _, incoming in incoming }.values.compactMap(SyncCloudKitRecords.syncRecord(from:))
+            return IncomingSidebarRecords.heldOut(server: current, local: []).contains(owner)
+        }
+        return true
+    }
+
+    private func comparePlugins(publish: Bool? = nil) throws {
+        guard isPluginsEnabled, plugins != nil else { return }
+        let records = try pluginRecords(at: now())
+        let held = Set(bases.filter { $0.recordType == .plugin && shouldHoldPlugin($0) }.map(\.recordName))
+        let scope = { (record: SyncRecord) in record.recordType == .plugin && !held.contains(record.recordName) && !self.shouldHoldPlugin(record) }
+        let changes = SyncDiff.changes(local: records.filter(scope), scope: scope, mirror: bases,
+                                       pending: mirror.pendingSaves, foundAt: now())
+        reconcile(changes, publish: publish ?? canSendRecords, includes: { $0.recordType == .plugin })
+    }
+
+    /// Applies only the completed fetch, preserving local-only installs and using explicit
+    /// tombstones for removals. Unknown records remain untouched in the mirror.
+    private func applyPlugins(local: [SyncRecord], server: [SyncRecord], base: [SyncRecord], date: Date) throws {
+        let localByName = Dictionary(local.map { ($0.recordName, $0) }, uniquingKeysWith: { first, _ in first })
+        let baseByName = Dictionary(base.map { ($0.recordName, $0) }, uniquingKeysWith: { first, _ in first })
+        var removals = Dictionary(mirror.pluginDeletions.map { ($0.recordName, $0) }, uniquingKeysWith: { first, _ in first })
+        for row in server where row.recordType == .plugin { removals[row.recordName] = nil }
+        for (name, type) in deleted where type == .plugin {
+            removals[name] = baseByName[name] ?? localByName[name] ?? mirror.pendingSaves.first { $0.recordName == name }
+        }
+        let removedOwners = Set(deleted.filter { $0.value == .persona }.keys)
+        for row in base + local + server where row.recordType == .plugin {
+            if case .reference(let owner) = row[.persona], removedOwners.contains(owner) { removals[row.recordName] = row }
+        }
+        mirror.pluginDeletions = Array(removals.values)
+        guard isPluginsEnabled, let plugins else { return }
+        let held = Set((base + server).filter { $0.recordType == .plugin && shouldHoldPlugin($0) }.map(\.recordName))
+        let scope = { (record: SyncRecord) in record.recordType == .plugin && !held.contains(record.recordName) && !self.shouldHoldPlugin(record) }
+        let differences = SyncDiff.changes(local: local.filter(scope), scope: scope, mirror: base,
+                                           pending: mirror.pendingSaves, foundAt: date)
+        let changed = Dictionary(differences.saves.map { ($0.recordName, $0) }, uniquingKeysWith: { first, _ in first })
+        let localDeletions = Set(differences.deletions).subtracting(reapplying)
+        let owners = Set(sidebar.sidebarSyncState.personas.map(\.id))
+        var items: [PersonaPluginSyncItem] = []
+        var merged: [SyncRecord] = []
+        for row in server where row.recordType == .plugin && removals[row.recordName] == nil {
+            guard !shouldHoldPlugin(row), let incoming = PluginRecords.item(from: row), owners.contains(incoming.personaID),
+                  first || !localDeletions.contains(row.recordName) else { continue }
+            let value: SyncRecord
+            if let local = localByName[row.recordName] {
+                let current = changed[row.recordName] ?? baseByName[row.recordName] ?? local
+                let mergeBase: SyncMerge.Base = first || reapplying.contains(row.recordName) || baseByName[row.recordName].map(shouldHoldPlugin) == true
+                    ? .firstSync : baseByName[row.recordName].map(SyncMerge.Base.mirror) ?? .firstWrite
+                value = SyncMerge.merge(local: current, server: row, base: mergeBase).record
+            } else { value = row }
+            if let item = PluginRecords.item(from: value) { items.append(item); merged.append(value) }
+        }
+        let removedItems = removals.values.compactMap(PluginRecords.item(from:))
+        try plugins.applyPluginSync(items, deleted: removedItems)
+        mirror.pluginDeletions.removeAll { PluginRecords.item(from: $0) != nil }
+        let mergedNames = Set(merged.map(\.recordName))
+        mirror.pendingSaves.removeAll { mergedNames.contains($0.recordName) }
+        mirror.pendingSaves.append(contentsOf: merged)
     }
 
     private func scheduleRemoteTabs(_ state: [OpenTabsSpace]) {
@@ -734,6 +860,7 @@ import Foundation
         holdGuard()
         defer { releaseGuard() }
         applying = true
+        plugins?.setPluginSyncActive(false)
         do {
             let date = now()
             let base = bases
@@ -748,12 +875,14 @@ import Foundation
                 reapplying.insert(name)
             }
             let server = fetched.values.compactMap(SyncCloudKitRecords.syncRecord(from:)).filter { sidebar.sidebarSyncState.canSyncSiteRules || $0.recordType != .siteRule }
+            let localPlugins = try pluginRecords(at: date)
             if first {
                 let comparison = settings.comparison(mirror: base, pending: mirror.pendingSaves)
                 try applyFirst(local: local + comparison.records, server: server, date: date)
             } else {
                 try applyFetched(local: local, server: server, base: base, date: date)
             }
+            try applyPlugins(local: localPlugins, server: server, base: base, date: date)
             try sidebar.saveNow().get()
             durableSidebar = sidebar.sidebarSyncState
             // The synchronous write supersedes every queued callback from earlier session writes.
@@ -773,6 +902,7 @@ import Foundation
                     let unreadableRules = !sidebar.sidebarSyncState.canSyncSiteRules && entry.value.recordType == SyncRecordType.siteRule.rawValue
                     return unsupported || unreadableRules ? entry.key : nil
                 })
+                .union(bases.filter { $0.recordType == .plugin && shouldHoldPlugin($0) }.map(\.recordName))
             reapplying.removeAll()
             if mirror.records.isEmpty {
                 awaitingZoneSave = true
@@ -784,6 +914,7 @@ import Foundation
             }
             try compareSidebar(sidebar.sidebarSyncState, publish: true)
             compareSettings(publish: true)
+            try comparePlugins(publish: true)
             try writeMirror()
             sidebar.finishSidebarSyncRecovery()
             fetched.removeAll()
@@ -794,6 +925,7 @@ import Foundation
             applying = false
             lastError = nil
             lastSync = date
+            plugins?.setPluginSyncActive(isPluginsEnabled)
             updateRemoteFolders()
             if showRemoteTabs {
                 let state = sidebar.openTabsSyncState
@@ -818,7 +950,7 @@ import Foundation
     /// Merges first-sync identities and applies the resulting sidebar and settings.
     private func applyFirst(local: [SyncRecord], server: [SyncRecord], date: Date) throws {
         let held = IncomingSidebarRecords.heldOut(server: server, local: local, deleted: deleted)
-        let plan = try FirstSyncMerge.plan(local: local.filter { !held.contains($0.recordName) }, server: server.filter { !held.contains($0.recordName) },
+        let plan = try FirstSyncMerge.plan(local: local.filter { $0.recordType != .plugin && !held.contains($0.recordName) }, server: server.filter { $0.recordType != .plugin && !held.contains($0.recordName) },
                                            samePage: { $0.isSamePage(as: $1) })
         var replacements = SidebarSyncReplacements()
         for match in plan.replacements {
@@ -829,7 +961,7 @@ import Foundation
             case .tab: replacements.tabs[old] = new
             case .favorite: replacements.favorites[old] = new
             case .siteRule: replacements.siteRules[old] = new
-            case .persona, .setting, .remoteTabs: break
+            case .persona, .setting, .plugin, .remoteTabs: break
             }
         }
         var rows = plan.recordsToApply
@@ -908,6 +1040,7 @@ import Foundation
             do {
                 if let durableSidebar { try compareSidebar(durableSidebar) }
                 compareSettings()
+                try comparePlugins()
                 compareRemoteTabs()
                 updateRemoteFolders()
                 persist()

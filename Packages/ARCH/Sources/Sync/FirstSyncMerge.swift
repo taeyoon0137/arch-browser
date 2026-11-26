@@ -135,7 +135,7 @@ public enum FirstSyncMerge {
         case .siteRule:
             guard case .text(let host) = record[.host], case .text(let prefix) = record[.pathPrefix] else { return nil }
             return .siteRule(persona: persona, host: host, pathPrefix: prefix)
-        case .persona, .setting, .remoteTabs:
+        case .persona, .setting, .plugin, .remoteTabs:
             return nil
         }
     }

@@ -252,6 +252,12 @@ import Testing
         await #expect(throws: WebStoreError.alreadyInstalled(name: "Packed", version: "2")) { try await installer.stage(extensionID, in: manager) }
         #expect(WebStoreError.alreadyInstalled(name: "Packed", version: "2").localizedDescription == "\u{201C}Packed\u{201D} 2 is installed, the Web Store\u{2019}s current version.")
         #expect(StoreStub.requests.count == 1)
+        // Sync may need the same package for the other engine's separate install entry.
+        offer(published)
+        let engineVersion = try await installer.stage(extensionID, in: manager, includingInstalledVersion: true)
+        #expect(engineVersion.origin == .webStore(extensionID) && engineVersion.proof == .webStore)
+        #expect(StoreStub.requests.count == 2 && downloadsInStaging.isEmpty)
+        manager.discard(engineVersion)
         // A newer version stages as an update of the installed plugin.
         offer(try crx("newer", #""manifest_version": 3, "name": "Packed", "version": "3""#, signedBy: [CRXFile.developer, CRXFile.publisher]), version: "3")
         let update = try await installer.stage(extensionID, in: manager)

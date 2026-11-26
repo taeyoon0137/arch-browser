@@ -142,7 +142,7 @@ public enum IncomingSidebarRecords {
                   text(.window).flatMap(SiteRule.Window.init(rawValue:)) != nil,
                   case .reference(let space) = item[.space], (try? identifier(space, type: .space)) != nil else { return false }
             return true
-        case .setting, .remoteTabs:
+        case .setting, .plugin, .remoteTabs:
             return true
         }
     }
@@ -278,7 +278,7 @@ public enum IncomingSidebarRecords {
             case .favorite: tombstones.favorites.insert(id)
             case .tab: tombstones.tabs.insert(id)
             case .siteRule: tombstones.siteRules.insert(id)
-            case .setting, .remoteTabs: break
+            case .setting, .plugin, .remoteTabs: break
             }
         }
         let repairDeletions = removed.keys.filter { deleted[$0] == nil }.sorted()

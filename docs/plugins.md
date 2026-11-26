@@ -13,8 +13,8 @@
 - All plugin kinds call one API. Built-in, installed, and AI-written plugins call the Swift API defined by `PluginContext`. Script plugins reach it through a JavaScript bridge, and web extensions reach it through a manifest mapping. A plugin gains a capability only when `PluginContext` gains a member. The engine protocols follow the same rule.
 - Declare first. A plugin's manifest lists its contributions, permissions, and requested events. Arch shows the contributions and starts the plugin's code only when one of them is used.
 - Only built-in Swift plugins, which are part of the app, run in the app process. Installed code runs in a WebKit web content process or in an engine's own extension runtime.
-- Only code the user reviewed runs. Script plugins load scripts only from their own package, and page scripts come only from package files.
-- Arch runs no servers of its own and makes no automatic updates. Plugins come from the app bundle, user-selected files, the Web Store for web extensions (`docs/web-store.md`), or the AI feature (VII.7). An update is a reviewed new install of the same identifier.
+- Manual installs require review. A synced install uses the source and grant approved on another Mac (Sync). Script plugins load scripts only from their own package, and page scripts come only from package files.
+- Arch runs no servers of its own and performs no automatic updates. Plugins come from the app bundle, user-selected files, package URLs for synced script installs (Sync), the Web Store for web extensions (`docs/web-store.md`), or the AI feature (VII.7). An update is a reviewed new install of the same identifier.
 
 ## Plugin kinds
 
@@ -74,13 +74,14 @@ A script plugin's `plugin.json`:
 | `events` | Events that start the plugin's background code |
 | `background` | The background script. A plugin without one can still add page scripts, settings, and panels |
 | `settingsPage` | Optional HTML file in the package for a settings sheet |
+| `source` | Optional HTTPS package URL for installation on another Mac through Sync. No user name, password, query, or fragment is allowed |
 | `contributes` | Commands, menu items, sidebar items, settings, and page scripts |
 
 Symbols use SF Symbols names, so plugins need no image files. A package may still carry an `icon` image for its Settings row.
 
 ### Keys the script runtime reads
 
-The runtime reads `id`, `name`, `version`, `apiVersion`, `summary`, `permissions`, `sites`, `siteAccess` (`listedSites`, the default, or `whenInvoked`, which needs commands, since a plugin without one would reach no page), `events` (the browser event kinds of `docs/hooks.md`, Browser events, and `settingChanged`, the plugin's own setting changes, which needs `contributes.settings`; events need a background script), and `background`, and these contributions:
+The runtime reads `id`, `name`, `version`, `apiVersion`, `summary`, `permissions`, `sites`, `siteAccess` (`listedSites`, the default, or `whenInvoked`, which needs commands, since a plugin without one would reach no page), `events` (the browser event kinds of `docs/hooks.md`, Browser events, and `settingChanged`, the plugin's own setting changes, which needs `contributes.settings`; events need a background script), `background`, the optional package `source` URL, and these contributions:
 
 | Key | Fields |
 |---|---|
@@ -249,7 +250,53 @@ A sidebar item with a `panel` may set `"presentation": "sidebar"`; the default i
 - An engine that does not run for the Persona when the user removes an extension, as when its application or the Persona's profile did not start in that launch, misses the removal and keeps the extension's storage, and Chromium keeps the extension installed, switched off, where an install with the same identifier would find its data. The runtime therefore keeps each such removal in `webExtension.json` in the Persona's folder, `{"missedRemovals": [{"engine": "chromium", "id": "<engine identifier>"}]}`: one entry per engine and engine identifier, for every engine that is not attached, or every engine while none runs extensions, except one where a counterpart with the same identifier keeps the storage, as at any removal. The first pass after that engine attaches in a later launch calls its `removeData(of:)` for each of its entries before it loads anything, so that an extension installed again with the same identifier starts without the removed one's storage, and then drops them; the file goes with its last entry. While an entry names an engine that the host lists, a pass attaches the engines even though no extension is enabled, as the removal itself starts them. An entry whose engine this build does not know stays in the file, and a file that does not decode counts as empty and is replaced at the next change, which leaves its storage until the Persona is deleted.
 - The record is the runtime's own file rather than part of `plugins.json`, which the manager owns. `plugins.json` lists what the user installed and chose; the record names engine storage left behind after an install is gone, which only the runtime reads and changes, so the manager stays out of the engines and a failed write of `plugins.json` cannot lose it. The manager gives each runtime the file `<kind>.json` in the Persona's folder (`PluginRuntime.runtimeFile`) and refuses that name as a plugin identifier, as it refuses `plugins.json`; the file goes with the Persona's folder in the removal pass after the user deletes the Persona, when the engines' storage of the Persona goes too. Every engine that is not attached counts as missing a removal: the runtime cannot tell an engine whose application did not start from one that runs no extensions on this Mac, so below macOS 15.4, where WebKit keeps no extension storage, WebKit's entries stay until a macOS update lets WebKit attach, which then deletes nothing and drops them.
 - Earlier builds gave the built-in plugins identifiers that start with `local.arch.browser.`, plugins that AI wrote identifiers that start with `local.arch.generated.`, and secrets the service prefix `local.arch.browser.plugin.`. At launch, before any manager exists, `PluginIdentifierMigration` moves that data to `xyz.taeyoon.arch.` (Page Address becomes `xyz.taeyoon.arch.page-address`) and `xyz.taeyoon.arch.generated.`: each Persona's plugin folders, with the identifier in a script plugin's `plugin.json`, the identifiers in `plugins.json`, the Keychain items, which move to `xyz.taeyoon.arch.plugin.<plugin id>`, and the user's shortcuts for plugin commands. An item moves only while its new name is free, and the old item goes only once the new one exists, so a run that stopped partway finishes at the next launch; a `plugins.json` entry, Keychain item, or shortcut that already exists under the new identifier wins, and a folder whose new name is taken stays. A folder whose `plugin.json` cannot take the new identifier, as on a full disk, keeps its name until a later launch writes it, since the manager reads a package only under the identifier its manifest names. A Keychain item that has not moved yet, as when the user refused the keychain prompt, counts by the service it moves to, so removing its plugin or deleting its Persona deletes it, and no later launch brings it back. Staging refuses the old identifiers, so nothing installs under them again, and no build saves secrets under the old prefix, so once every item has moved, `ARCHPluginSecretsMoved` keeps later launches from listing the Keychain's items again.
-- Sync (V.9) does not cover plugins. A later task can sync `plugins.json` without packages or secrets.
+- Installed plugins and their non-secret settings sync through the existing CloudKit zone when Sync Plugins is on (Sync). Packages are fetched from their source on each Mac; storage and secrets stay on that Mac.
+
+## Sync
+
+Settings ▸ Sync has a Sync Plugins switch, on by default while Sync with iCloud is on. Its local preference, `ARCHSyncPluginsEnabled`, defaults to true and does not sync. Turning it off pauses plugin uploads and incoming changes, cancels automatic installs, and keeps local plugins and the cloud list. The mirror retains arrivals and tombstones received while paused, including across a relaunch. Sidebar and other settings sync continue. Turning it on fetches before reconciling the plugin list. Matching entries take the server's values; new local installs upload.
+
+Each Persona has its own list. The optional `syncItems` field in that Persona's `plugins.json` retains received install metadata across relaunches, including missing packages, their settings, and engine assignments while a counterpart is still downloading. Installs, removals, changes to enabled state, and non-secret setting changes apply to the same Persona on the other Macs. A removal uses the normal uninstall path there, including stopping the plugin and removing its local package, storage, and Keychain items. An arriving Persona gets its own plugin manager; a deleted Persona's plugins never move to another Persona.
+
+### Sources and installation
+
+The local `unfinishedSyncInstalls` field keeps an install pending when its package arrived but its settings or final list could not be saved, allowing it to retry after relaunch.
+
+- A Web Store install shares its store identifier. The receiving Mac uses `WebStoreInstaller` to fetch and verify a fresh package for that identifier, including checks of its signatures, identifier, size, and digest (`docs/web-store.md`). That Mac establishes proof from its downloaded package, never from a sync record.
+- A script package shares its HTTPS install URL, or its manifest's optional `source` URL when installed from a file. A reusable URL has no user name, password, query, or fragment. A local file path is never a source for another Mac. The receiving Mac downloads and stages the package, checks that its identifier and kind match the record, and installs it with the synced enabled state, grant limited to what the package requests, and non-secret settings that its manifest accepts.
+- A plugin without a reusable source stays listed in Settings ▸ Plugins as Install on this Mac. Its record and settings remain available until the user supplies its package or removes it. No package bytes, generated source code, AI requests, local package paths, or signing proof enter CloudKit. Built-in plugins are excluded from sync.
+- Each version in an engine pair keeps its own source, install identifier, manifest identifier, and engine assignment. Sync does not substitute one engine's package for the other. Compatibility checks and engine failures remain local.
+
+### Data boundary
+
+Sync projects the installed list and the manifest's non-secret setting fields. It never serializes `plugins.json` or `storage.json` wholesale. Secret settings, `arch.secrets`, every Keychain item, plugin key-value storage, and extension storage stay on each Mac. A setting that the installed manifest marks secret is excluded both when sending and when applying. An incoming value cannot turn a secret setting into an ordinary setting.
+
+### CloudKit schema
+
+Plugin records use the private database's existing `ArchSync1` zone and schema version 4, with the same mirror, field edit times, conflict merge, and tombstones as sidebar records (`docs/sync.md`). One `Plugin` record represents one install entry in one Persona. Its record name is `plugin.<persona record name>.<digest>`, where the default Persona is `default`, another Persona is its UUID, and `digest` is the lowercase hexadecimal SHA-256 of the install entry identifier's UTF-8 bytes. Two engine versions therefore have separate records even when their manifests use one identifier. Joining or separating a pair does not rename a record.
+
+Deploy this new `Plugin` record type with these fields:
+
+| Field | CloudKit type | Meaning |
+|---|---|---|
+| `persona` | Reference, no delete action | Owning `Persona` record |
+| `pluginID` | Encrypted String | Install entry identifier |
+| `manifestID` | Encrypted String | Identifier the package must declare |
+| `name` | Encrypted String | Name for an install still missing on this Mac |
+| `kind` | Encrypted String | Plugin kind's raw value |
+| `source` | Optional Encrypted String | JSON encoding of `PluginSyncSource`: Web Store identifier or HTTPS package URL; absent without a reusable source |
+| `enabled` | Encrypted String | `true` or `false` |
+| `settings` | Encrypted String | JSON object of manifest-declared non-secret settings |
+| `grant` | Encrypted String | JSON encoding of approved permissions, sites, network hosts, and site access |
+| `engine` | Optional Encrypted String | Engine assignment for this version, as `EngineKind`'s raw value |
+| `counterpartID` | Optional Encrypted String | Other install entry in the engine pair |
+| `modifiedAt` | Date | Time the writing Mac found the latest edit |
+| `fieldModifiedAt` | Encrypted String | JSON object of field edit times, as for every synced record |
+| `schemaVersion` | Int64 | `4` in this build |
+
+The identity, kind, source, grant, and engine-pair fields merge as one unit; name, enabled state, and the settings object merge independently. Conflict resolution keeps the source with its grant and engine assignment. Deleting the record uninstalls that entry; deleting its Persona removes its plugin records. A record with an unknown kind or engine, an invalid identity, or a value this build cannot read stays in the mirror and is neither applied nor overwritten.
+
+The schema is additive. Deploy the new record type and every listed field from Development to Production in CloudKit Console before a Developer ID build writes them. No new zone is needed. Deployment and two-Mac installation checks remain unverified.
 
 ## Personas
 

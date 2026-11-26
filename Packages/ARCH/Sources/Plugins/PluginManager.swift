@@ -174,6 +174,13 @@ public final class PluginManager: ObservableObject {
     private var installs: [PluginListFile.InstallEntry]
     /// The pairs `plugins.json` keeps, as it holds them, including those whose versions are not both listed or that name an engine this build does not know, which stay in the file and are ignored.
     private var pairRecords: [[String: String]]
+    /// Desired installs received from iCloud, including packages still missing on this Mac.
+    private var syncedItems: [PluginSyncItem] = []
+    /// Installs whose packages arrived but whose settings or final list remain unsaved.
+    private var unfinishedSyncInstalls: Set<String> = []
+    /// Called after a local list or non-secret setting write succeeds.
+    public var onSyncChange: (() -> Void)?
+    private var applyingSync = false
     private let secretStore: any PluginSecretStore
     private let scriptLimits: ScriptPluginLimits
     /// The SHA-256 digest of the key whose proof in a `.crx` file shows that the Web Store published it: the store's, or a test's own.
@@ -296,14 +303,18 @@ public final class PluginManager: ObservableObject {
         let restored = Self.restoredRecords(for: plugins, records: pairRecords)
         pairRecords += restored
         let (paired, pairs) = Self.paired(plugins, records: pairRecords)
-        self.plugins = paired
+        let syncedItems = (list?.syncItems ?? []).filter { $0.isValid && $0.kind != PluginKind.builtIn.rawValue }
+        let scoped = Self.scopedForSync(paired, items: syncedItems)
+        self.plugins = scoped
         engineVersions = pairs
         self.builtIns = types
         self.packages = packages
         self.choices = choices
         self.installs = installs
         self.pairRecords = pairRecords
-        contributions = PluginContributionIndex(paired, disabledCommands: disabledCommands)
+        self.syncedItems = syncedItems
+        unfinishedSyncInstalls = Set(list?.unfinishedSyncInstalls ?? []).intersection(syncedItems.map(\.id))
+        contributions = PluginContributionIndex(scoped, disabledCommands: disabledCommands)
         // Packages that were under review when the app last quit cannot be installed any more.
         try? FileManager.default.removeItem(at: stagingDirectory)
         if !restored.isEmpty { saveList() }
@@ -376,7 +387,17 @@ public final class PluginManager: ObservableObject {
     private func setPlugins(_ next: [InstalledPlugin]) {
         let (paired, pairs) = Self.paired(next, records: pairRecords)
         if pairs != engineVersions { engineVersions = pairs }
-        plugins = paired
+        plugins = Self.scopedForSync(paired, items: syncedItems)
+    }
+
+    /// Keeps a package limited to its engine before its other version arrives.
+    private static func scopedForSync(_ values: [InstalledPlugin], items: [PluginSyncItem]) -> [InstalledPlugin] {
+        values.map { value in
+            var value = value
+            if value.pairEngine == nil, let item = items.first(where: { $0.id == value.id.rawValue }),
+               let engine = item.engine.flatMap(EngineKind.init(rawValue:)) { value.pairEngine = engine }
+            return value
+        }
     }
 
     /// The answers in an install entry that engines of `engines` gave at their present versions. An engine name this build does not know, and an answer from another version of the engine, count as no check.
@@ -488,9 +509,21 @@ public final class PluginManager: ObservableObject {
 
     /// Writes `plugins.json` from the lists, with the changes of earlier writes that failed, and clears `listWriteFailure`. Throws the encoder's or the file system's error, and the file then stays as it was.
     private func writeList() throws {
-        let data = try JSONEncoder().encode(PluginListFile(choices: choices, installed: installs, engineVersions: pairRecords.isEmpty ? nil : pairRecords))
+        let data = try JSONEncoder().encode(PluginListFile(choices: choices, installed: installs, engineVersions: pairRecords.isEmpty ? nil : pairRecords,
+                                                        syncItems: syncedItems.isEmpty ? nil : syncedItems,
+                                                        unfinishedSyncInstalls: unfinishedSyncInstalls.isEmpty ? nil : unfinishedSyncInstalls.sorted()))
         try PluginFile.write(data, to: directory.appendingPathComponent(PluginListFile.name))
         if listWriteFailure != nil { listWriteFailure = nil }
+        notifySyncChange()
+    }
+
+    private func notifySyncChange() {
+        guard !applyingSync, onSyncChange != nil else { return }
+        // Most list writes happen before the new list is published; notify observers after it changes.
+        Task { @MainActor [weak self] in
+            guard let self, !isClosed, listWriteFailure == nil else { return }
+            onSyncChange?()
+        }
     }
 
     /// Writes `plugins.json` again after a write failed, for Settings' Try Again; nothing once the manager is closed.
@@ -507,6 +540,152 @@ public final class PluginManager: ObservableObject {
         Task {
             guard (try? await stopped.activation.value) != nil else { return }
             await stopped.plugin.deactivate()
+        }
+    }
+
+    // MARK: Plugin sync
+
+    /// Installed and pending plugins, without packages, private storage, or secrets.
+    public var syncItems: [PluginSyncItem] {
+        let pending = pendingSyncItems
+        let pendingIDs = Set(pending.map(\.id))
+        return plugins.filter { $0.kind != .builtIn && !pendingIDs.contains($0.id.rawValue) }.map { plugin in
+            var values: [String: PluginValue] = [:]
+            for setting in plugin.manifest.contributions.settings where setting.kind != .secret {
+                if let value = value(of: setting, for: plugin.id) { values[setting.key] = value }
+            }
+            return PluginSyncItem(id: plugin.id.rawValue, manifestID: plugin.manifest.id.rawValue, name: plugin.manifest.name,
+                                  kind: plugin.kind.rawValue, source: Self.syncSource(of: plugin), isEnabled: plugin.isEnabled,
+                                  settings: values, grant: plugin.grant, engine: plugin.pairEngine?.rawValue,
+                                  counterpartID: plugin.counterpart?.rawValue ?? syncedItems.first { $0.id == plugin.id.rawValue }?.counterpartID)
+        } + pending
+    }
+
+    /// Desired packages missing on this Mac, including an installed entry whose source changed remotely.
+    public var pendingSyncItems: [PluginSyncItem] {
+        syncedItems.filter { item in
+            unfinishedSyncInstalls.contains(item.id) || !plugins.contains { plugin in
+                plugin.id.rawValue == item.id && plugin.manifest.id.rawValue == item.manifestID
+                    && plugin.kind.rawValue == item.kind && Self.syncSource(of: plugin) == item.source
+            }
+        }
+    }
+
+    private static func syncSource(of plugin: InstalledPlugin) -> PluginSyncSource? {
+        switch plugin.origin {
+        case .webStore(let id): return PluginSyncSource.webStore(id).isValid ? .webStore(id) : nil
+        case .file(let url):
+            if PluginSyncSource.accepts(url) { return .url(url) }
+            return plugin.manifest.source.flatMap { PluginSyncSource.accepts($0) ? .url($0) : nil }
+        case .bundled, .generated: return nil
+        }
+    }
+
+    /// Saves received desired state before downloads start. Deletions remove the same entry on this Mac.
+    public func applySyncItems(_ items: [PluginSyncItem], deleting ids: Set<String>) throws {
+        guard !isClosed else { throw PluginError.closed }
+        guard !items.isEmpty || !ids.isEmpty else { return }
+        let wasApplying = applyingSync
+        applyingSync = true
+        var completed = false
+        defer { applyingSync = wasApplying; if completed { notifySyncChange() } }
+        for raw in ids {
+            guard let id = PluginID(rawValue: raw) else { continue }
+            try remove(id)
+        }
+        for item in items where item.isValid && item.kind != PluginKind.builtIn.rawValue && !ids.contains(item.id) {
+            syncedItems.removeAll { $0.id == item.id }
+            syncedItems.append(item)
+            guard let id = PluginID(rawValue: item.id), let installed = plugins.first(where: { $0.id == id }),
+                  installed.manifest.id.rawValue == item.manifestID, installed.kind.rawValue == item.kind else { continue }
+            guard Self.syncSource(of: installed) == item.source else {
+                // A disable takes effect while the replacement downloads; its new grant waits for its checked package.
+                if !item.isEnabled { setEnabled(false, for: [id], failure: nil) }
+                continue
+            }
+            try applySyncSettings(item, to: installed)
+        }
+        restoreSyncedPairs(affecting: Set(items.map(\.id)).union(ids))
+        try writeList()
+        setPlugins(plugins)
+        objectWillChange.send()
+        completed = true
+    }
+
+    /// Installs a downloaded or locally chosen package only if the desired install is unchanged.
+    public func installSynced(_ package: PluginPackage, for item: PluginSyncItem) throws {
+        guard !isClosed else { throw PluginError.closed }
+        guard item.isValid, syncedItems.contains(item), let id = PluginID(rawValue: item.id),
+              package.manifest.id.rawValue == item.manifestID, package.kind.rawValue == item.kind,
+              Self.isEntry(id, of: package.manifest.id) else { throw PluginError.stopped }
+        if let engine = item.engine.flatMap(EngineKind.init(rawValue:)), package.engineChecks[engine] != .runs {
+            throw PluginError.stopped
+        }
+        if case .webStore(let identifier) = item.source {
+            guard package.origin == .webStore(identifier), package.proof == .webStore else { throw PluginError.stopped }
+        }
+        if case .url(let source) = item.source {
+            guard package.origin == .file(source) || package.manifest.source == source else { throw PluginError.stopped }
+        }
+        if let counterpart = plugins.first(where: { $0.id.rawValue == item.counterpartID }),
+           proofRefusal(joining: package.manifest, proof: package.proof, with: counterpart) != nil { throw PluginError.stopped }
+        let wasApplying = applyingSync
+        applyingSync = true
+        var completed = false
+        defer { applyingSync = wasApplying; if completed { notifySyncChange() } }
+        var package = package
+        // A second version with the same manifest keeps its synced entry identifier regardless of arrival order.
+        package.updates = id
+        unfinishedSyncInstalls.insert(item.id)
+        try install(package, grant: item.grant, isEnabled: false)
+        guard let installed = plugins.first(where: { $0.id == id }) else { throw PluginError.stopped }
+        try applySyncSettings(item, to: installed)
+        if let index = syncedItems.firstIndex(where: { $0.id == item.id }) { syncedItems[index].source = Self.syncSource(of: installed) }
+        restoreSyncedPairs(affecting: [item.id])
+        unfinishedSyncInstalls.remove(item.id)
+        do { try writeList() }
+        catch { unfinishedSyncInstalls.insert(item.id); throw error }
+        setPlugins(plugins)
+        completed = true
+    }
+
+    private func applySyncSettings(_ item: PluginSyncItem, to installed: InstalledPlugin) throws {
+        let id = installed.id
+        let storage = storage(for: id)
+        var accepted: [String: PluginValue] = [:]
+        for setting in installed.manifest.contributions.settings where setting.kind != .secret {
+            let value = item.settings[setting.key].flatMap { setting.kind.accepts($0) ? $0 : nil }
+            try storage.setSettingValue(value, forKey: setting.key)
+            if let value { accepted[setting.key] = value }
+        }
+        try storage.saveChangesForSync()
+        if let index = syncedItems.firstIndex(where: { $0.id == item.id }) { syncedItems[index].settings = accepted }
+        if let index = installs.firstIndex(where: { $0.id == item.id }), case var .readable(entry) = installs[index] {
+            entry.grant = item.grant.limited(to: installed.manifest, kind: installed.kind)
+            installs[index] = .readable(entry)
+            if let plugin = plugins.firstIndex(where: { $0.id == id }) {
+                if plugins[plugin].grant != entry.grant { stop(id) }
+                plugins[plugin].grant = entry.grant
+            }
+        }
+        // Applying one engine's switch must preserve the incoming switch for the other version.
+        setEnabled(item.isEnabled, for: [id], failure: nil)
+    }
+
+    private func restoreSyncedPairs(affecting ids: Set<String>) {
+        for item in syncedItems where ids.contains(item.id) {
+            guard let id = PluginID(rawValue: item.id) else { continue }
+            dropRecords(naming: [id])
+        }
+        for item in syncedItems where ids.contains(item.id) || item.counterpartID.map(ids.contains) == true {
+            guard let engine = item.engine.flatMap(EngineKind.init(rawValue:)),
+                  let otherEngine = PluginEngineVersions.other(than: engine),
+                  let other = syncedItems.first(where: { $0.id == item.counterpartID && $0.counterpartID == item.id && $0.engine == otherEngine.rawValue }),
+                  let id = PluginID(rawValue: item.id), let otherID = PluginID(rawValue: other.id),
+                  let installed = plugins.first(where: { $0.id == id }), let counterpart = plugins.first(where: { $0.id == otherID }),
+                  proofRefusal(joining: installed.manifest, proof: installed.proof, with: counterpart) == nil,
+                  !pairRecords.contains(where: { $0.values.contains(item.id) }) else { continue }
+            pairRecords.append(PluginEngineVersions([engine: id, otherEngine: otherID]).fileRecord)
         }
     }
 
@@ -752,7 +931,7 @@ public final class PluginManager: ObservableObject {
             if let refusal = updateRefusal(for: package, updating: id) { throw PluginError.invalidPackage(refusal) }
         }
         let isNew = !plugins.contains { $0.id == id }
-        let listed = (choices, installs, pairRecords)
+        let listed = (choices, installs, pairRecords, syncedItems, unfinishedSyncInstalls)
         badges[id] = nil
         stop(id)
         // A copy that another Persona reads from here from now on reads a package that this install moves or replaces.
@@ -773,6 +952,10 @@ public final class PluginManager: ObservableObject {
         }
         recordChoice(isEnabled, for: id)
         let plugin = Self.installedPlugin(installed, id: id, install: install, isEnabled: isEnabled, runtime: runtime)
+        if !applyingSync, let index = syncedItems.firstIndex(where: { $0.id == id.rawValue }) {
+            syncedItems[index].source = Self.syncSource(of: plugin)
+        }
+        if !applyingSync { unfinishedSyncInstalls.remove(id.rawValue) }
         var next = plugins
         if let index = next.firstIndex(where: { $0.id == id }) {
             next[index] = plugin
@@ -796,7 +979,7 @@ public final class PluginManager: ObservableObject {
         } catch {
             // Without the entry, the next launch would not list a new plugin and would read an update's package with the old entry's grant and origin.
             move.undo()
-            (choices, installs, pairRecords) = listed
+            (choices, installs, pairRecords, syncedItems, unfinishedSyncInstalls) = listed
             throw error
         }
         move.finish()
@@ -1001,6 +1184,10 @@ public final class PluginManager: ObservableObject {
             throw PluginError.invalidVersions(localized("Both versions of \u{201C}\(leadVersion(of: id)?.manifest.name ?? plugin.manifest.name)\u{201D} have one identifier, which each engine loads only once, so they stay one plugin. Remove a version instead."))
         }
         dropRecords(naming: [plugin.id, counterpart.id])
+        for index in syncedItems.indices where syncedItems[index].id == plugin.id.rawValue || syncedItems[index].id == counterpart.id.rawValue {
+            syncedItems[index].engine = nil
+            syncedItems[index].counterpartID = nil
+        }
         var next = plugins
         dismiss(counterpart.enginesRunningPackage, notesOf: plugin.id, in: &next)
         dismiss(plugin.enginesRunningPackage, notesOf: counterpart.id, in: &next)
@@ -1077,6 +1264,13 @@ public final class PluginManager: ObservableObject {
 
     /// Deletes an installed plugin, or one version of a pair, from the Persona: it stops, and its package, storage, and secrets go, and its runtime deletes what it keeps of it. The other version of a pair stays installed in the pair's place with its grant, storage, and switch, and the pair's record goes. Built-in plugins cannot be removed, only switched off. Throws when the Keychain or the file system refuses, with the plugin still installed. A write of `plugins.json` that fails does not throw but sets `listWriteFailure`: the file keeps the plugin's entry, which the next launch leaves out of the list, since its package is gone, and its pair's record, which the next launch ignores, and an install with the identifier takes neither.
     public func remove(_ id: PluginID) throws {
+        syncedItems.removeAll { $0.id == id.rawValue }
+        unfinishedSyncInstalls.remove(id.rawValue)
+        for index in syncedItems.indices where syncedItems[index].counterpartID == id.rawValue {
+            syncedItems[index].engine = nil
+            syncedItems[index].counterpartID = nil
+        }
+        if packages[id] == nil { try writeList(); objectWillChange.send(); return }
         guard packages[id] != nil, let installed = plugins.first(where: { $0.id == id }) else { return }
         badges[id] = nil
         stop(id)
@@ -1522,7 +1716,10 @@ public final class PluginManager: ObservableObject {
         guard !isClosed else { throw PluginError.closed }
         objectWillChange.send()
         let before = self.value(of: setting, for: id)
-        try storage(for: id).setSettingValue(value, forKey: setting.key)
+        if setting.kind != .secret {
+            try storage(for: id).setSettingValueAndSave(value, forKey: setting.key)
+            notifySyncChange()
+        } else { try storage(for: id).setSettingValue(value, forKey: setting.key) }
         settingDidChange(setting, of: id, from: before)
     }
 
@@ -1966,6 +2163,10 @@ struct PluginListFile: Codable {
     var installed: [InstallEntry]?
     /// The pairs of engine versions in the order the user made them, each as an object from engine name to plugin identifier, including those this build ignores. Absent from files without pairs.
     var engineVersions: [[String: String]]?
+    /// Desired remote installs and their engine assignments, without packages or private data.
+    var syncItems: [PluginSyncItem]? = nil
+    /// Local recovery markers; these identifiers are never included in the CloudKit projection.
+    var unfinishedSyncInstalls: [String]? = nil
 }
 
 /// The context the manager gives each plugin instance it starts. It acts for the instance until the manager ends it, when the instance stops or its activation fails. From then on its storage and secrets only read, its actions throw `PluginError.stopped`, and its badges do nothing, so tasks the instance left running cannot act for the plugin.

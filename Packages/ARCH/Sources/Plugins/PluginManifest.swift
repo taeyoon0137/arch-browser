@@ -36,6 +36,8 @@ public struct PluginManifest: Hashable, Sendable {
     public var version: String
     /// What the plugin does, in one sentence.
     public var summary: String
+    /// An HTTPS package URL for installing this script plugin on another Mac.
+    public var source: URL?
     public var permissions: Set<PluginPermission>
     /// Hosts named by the script plugin's `network` permission.
     public var network: [PluginNetworkHost]
@@ -61,11 +63,12 @@ public struct PluginManifest: Hashable, Sendable {
 
     public init(id: PluginID, name: String, version: String, summary: String, permissions: Set<PluginPermission> = [], aiDataKinds: Set<AIDataKind> = [], network: [PluginNetworkHost] = [], settingsPage: String? = nil,
                 sites: [MatchPattern] = [], siteAccess: SiteAccess = .listedSites, extensionPermissions: [String] = [], contributions: PluginContributions,
-                events: Set<BrowserEventKind> = [], receivesSettingChanges: Bool = false, author: String? = nil, homepage: String? = nil) {
+                events: Set<BrowserEventKind> = [], receivesSettingChanges: Bool = false, author: String? = nil, homepage: String? = nil, source: URL? = nil) {
         self.id = id
         self.name = name
         self.version = version
         self.summary = summary
+        self.source = source.flatMap { PluginSyncSource.accepts($0) ? $0 : nil }
         self.permissions = permissions
         self.network = permissions.contains(.network) ? network : []
         self.settingsPage = settingsPage
@@ -290,7 +293,7 @@ extension PluginGrant: Codable {
 
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(permissions, forKey: .permissions)
+        try container.encode(permissions.map(\.rawValue).sorted(), forKey: .permissions)
         try container.encode(sites, forKey: siteAccess == .whenInvoked ? .sitesWhenInvoked : .sites)
         if !network.isEmpty { try container.encode(network, forKey: .network) }
     }

@@ -142,7 +142,7 @@ import Terminal
             return
         }
         self.session = session
-        let sync = SyncController(sidebar: session, directory: supportDirectory)
+        let sync = SyncController(sidebar: session, plugins: session, directory: supportDirectory)
         self.sync = sync
         PreferencesWindowController.syncController = sync
         session.isSyncing = sync.isEnabled

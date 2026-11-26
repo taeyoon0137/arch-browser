@@ -819,6 +819,7 @@ final class EngineRuntime {
         }
         // The Web Store's update results for its plugins go with them.
         webStore.forget(id)
+        pluginSync.cancel(in: id)
         personaDataRemoval.removeAtNextLaunch(id)
         saveNow()
     }
@@ -1626,6 +1627,8 @@ final class EngineRuntime {
     private let builtInPlugins: [any BuiltInPlugin.Type]
     /// Connects each tab to its Persona's plugins.
     private let pluginPages = PluginPages()
+    /// Downloads missing synced packages and reports their local installation status.
+    public let pluginSync = PluginSyncCoordinator()
     /// Hosts each Persona's web extensions in the windows and tabs.
     let webExtensionHost = SessionWebExtensionHost()
 
@@ -1644,6 +1647,11 @@ final class EngineRuntime {
         let plugins = PluginManager(persona: personaID, directory: userDataDirectory, builtIns: builtInPlugins, runtimes: [webExtensions], events: events, browserHost: pluginBrowserHost,
                                     ai: AIService.shared)
         plugins.nativeAppGate = nativeMessagingHosts
+        plugins.onSyncChange = { [weak self] in
+            guard let self else { return }
+            pluginSync.reconcile(in: self)
+            onPluginSyncChange?()
+        }
         engines.plugins = plugins
         engines.webExtensions = webExtensions
         // The session compares each change of the names with the names before it, starting from none, as before the runtime, so that the names of the manager's first list also reach a tab that showed an extension's page before the runtime named it, and a first list that names nothing announces nothing. The manager lists its first plugins as it is made, which a view body can do, so each change reaches the session on the next turn of the run loop, after that body has drawn.

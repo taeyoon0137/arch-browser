@@ -70,15 +70,34 @@ final class PluginStorageFile: PluginStorage {
         try store(value, forKey: Self.settingKeyPrefix + key)
     }
 
+    /// If a settings write fails, the stored value is restored so a later sync cannot publish an unsaved edit.
+    func setSettingValueAndSave(_ value: PluginValue?, forKey key: String) throws {
+        let storedKey = Self.settingKeyPrefix + key
+        let previous = entries[storedKey]
+        let previousSize = size
+        do {
+            try setSettingValue(value, forKey: key)
+            try saveChangesForSync()
+        } catch {
+            entries[storedKey] = previous
+            size = previousSize
+            throw error
+        }
+    }
+
     /// Writes the changes that have not reached the file yet, if any.
     func saveChanges() {
+        try? saveChangesForSync()
+    }
+
+    /// Reports write failures so sync does not acknowledge unsaved settings.
+    func saveChangesForSync() throws {
         guard let pendingSave else { return }
+        let data = try Self.encoder.encode(entries.mapValues(\.value))
+        try PluginFile.write(data, to: fileURL)
         pendingSave.cancel()
         self.pendingSave = nil
         firstUnsavedChange = nil
-        // Every entry encodes, since `size(of:forKey:)` checked each value where the file holds it.
-        guard let data = try? Self.encoder.encode(entries.mapValues(\.value)) else { return }
-        try? PluginFile.write(data, to: fileURL)
     }
 
     /// Drops the changes that have not reached the file, when the user removes the plugin or deletes its Persona, so that none writes the file again.

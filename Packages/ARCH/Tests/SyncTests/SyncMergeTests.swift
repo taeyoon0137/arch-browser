@@ -349,7 +349,7 @@ import Testing
         #expect(SyncRecordType.tab.fields == [.persona, .space, .folder, .url, .title, .customTitle, .engine, .order])
         #expect(SyncRecordType.setting.fields == [.value])
         #expect(SyncRecordType.siteRule.fields == [.host, .pathPrefix, .persona, .space, .window])
-        #expect(SyncRecordType.allCases.map(\.rawValue) == ["Persona", "Space", "Folder", "Favorite", "Tab", "Setting", "RemoteTabs", "SiteRule"])
+        #expect(SyncRecordType.allCases.map(\.rawValue) == ["Persona", "Space", "Folder", "Favorite", "Tab", "Setting", "Plugin", "RemoteTabs", "SiteRule"])
     }
 
     @Test func eachTypeListsItsMergeUnits() {
