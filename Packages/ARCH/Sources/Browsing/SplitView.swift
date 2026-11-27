@@ -9,6 +9,7 @@ import SwiftUI
 struct PageAreaView: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Receives the panes' frames, so that a tab dragged from the sidebar can open beside one; nil in a window without a sidebar. The page area itself does not change during a drag.
     let sidebarDrag: SidebarDragState?
     let margins: EdgeInsets
@@ -25,15 +26,25 @@ struct PageAreaView: View {
 
     var body: some View {
         let isPageFullscreen = windowModel.isPageFullscreen
+        let isCoveredByPreview = windowModel.preview?.isPresentationReady == true && !windowModel.isPreviewDismissing
+        let shouldReduceMotion = reduceMotion
         panes(isPageFullscreen: isPageFullscreen)
+            // Recede the existing page without changing its native viewport or ownership.
+            .visualEffect { content, geometry in
+                content
+                    .scaleEffect(x: isCoveredByPreview && !shouldReduceMotion ? max(0, geometry.size.width - 18) / max(1, geometry.size.width) : 1,
+                                 y: isCoveredByPreview && !shouldReduceMotion ? max(0, geometry.size.height - 18) / max(1, geometry.size.height) : 1)
+                    .opacity(isCoveredByPreview ? 0.3 : 1)
+            }
+            .animation(reduceMotion ? nil : .spring(response: isCoveredByPreview ? 0.225 : 0.245,
+                                                   dampingFraction: isCoveredByPreview ? 0.895 : 0.865,
+                                                   blendDuration: 0), value: isCoveredByPreview)
+            .accessibilityHidden(windowModel.preview != nil)
             // A preview floats over the whole page area, whatever its panes.
             .overlay {
                 if let preview = windowModel.preview {
-                    ZStack {
-                        PageFrameShape().fill(Color.black.opacity(0.25))
-                            .onTapGesture { windowModel.closePreview() }
-                        PagePreviewPanel(preview: preview)
-                    }
+                    PagePreviewOverlay(preview: preview)
+                        .id(ObjectIdentifier(preview))
                 }
             }
             .padding(isPageFullscreen ? EdgeInsets() : margins)

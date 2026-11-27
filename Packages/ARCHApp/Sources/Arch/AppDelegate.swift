@@ -689,17 +689,10 @@ import Terminal
     @objc private func zoomIn() { session.activeWindow?.zoomIn() }
     @objc private func zoomOut() { session.activeWindow?.zoomOut() }
     @objc private func resetZoom() { session.activeWindow?.resetZoom() }
-    /// Find… in the History window, which the browser window behind it does not answer, goes to the window's search field.
+    /// Find searches the library's visible history before falling back to the page.
     @objc private func showFindBar() {
-        if let history = keyHistoryWindow { return history.focusSearch() }
+        if session.activeWindow?.focusLibraryHistorySearch() == true { return }
         session.activeWindow?.showFindBar()
-    }
-
-    /// The History window while it, or its Clear History sheet, is key.
-    private var keyHistoryWindow: HistoryWindowController? {
-        var window = NSApp.keyWindow
-        while let parent = window?.sheetParent { window = parent }
-        return window?.windowController as? HistoryWindowController
     }
     @objc private func findNext() { session.activeWindow?.findNext() }
     @objc private func findPrevious() { session.activeWindow?.findPrevious() }
@@ -710,27 +703,21 @@ import Terminal
     @objc private func goBack() { session.activeWindow?.goBack() }
     @objc private func goForward() { session.activeWindow?.goForward() }
     @objc private func goHome() { session.activeWindow?.goHome() }
-    /// Asks for the range to clear in the History window's sheet, as its own Clear History… does, on the active window's Persona.
-    @objc private func clearHistory() { historyWindow.showClearHistory(persona: historyPersona) }
+    /// Uses the existing history scopes in a sheet on the browser, without opening another window.
+    @objc private func clearHistory() {
+        let target = session.historyTarget()
+        guard let window = target.nsWindow else { return }
+        window.makeKeyAndOrderFront(nil)
+        HistoryClearSheet.show(store: session.history, persona: target.personaID,
+                               personas: session.personas.map { HistoryPersona(id: $0.id, name: $0.name) }, in: window)
+    }
     @objc private func clearSiteData() { session.activeWindow?.confirmClearSiteData() }
 
-    @objc private func showHistory() { historyWindow.show(persona: historyPersona) }
-
-    /// The Persona whose history the History menu shows: the active window's, or the default one while no browser window is open, as for the Plugins menu.
-    private var historyPersona: UUID { session.activeWindow.flatMap { $0.isPrivate ? nil : $0.personaID } ?? Persona.defaultID }
-
-    /// The History window, made on first use. Its pages open as new tabs of the shown Persona, in the space where a new tab of the Persona goes, selected in the sidebar target, which comes to the front.
-    private lazy var historyWindow: HistoryWindowController = {
-        let history = HistoryWindowController(store: session.history) { [weak self] in
-            self?.session.personas.map { HistoryPersona(id: $0.id, name: $0.name) } ?? []
-        }
-        history.openURL = { [weak self] url, persona in
-            guard let session = self?.session else { return }
-            session.openTab(url: url, in: session.preferredSpace(in: persona).id)
-            session.sidebarTarget().nsWindow?.makeKeyAndOrderFront(nil)
-        }
-        return history
-    }()
+    @objc private func showHistory() {
+        let target = session.historyTarget()
+        target.showHistoryInLibrary()
+        target.nsWindow?.makeKeyAndOrderFront(nil)
+    }
 
     /// Fills the Bookmarks menu for the sidebar target, and lists the active window's selected tab's previous ten pages, most recent first, between Forward and Show All History. Both are made when their menu opens rather than in `menuNeedsUpdate(_:)`, which AppKit also calls to search the menu for each key equivalent the user presses; their items have no key equivalents.
     func menuWillOpen(_ menu: NSMenu) {
@@ -999,9 +986,9 @@ import Terminal
             let window = session?.lastMainWindow
             item.title = window?.isSidebarVisible == true && window?.isLibraryVisible == true ? localized("Hide Library") : localized("Show Library")
         }
-        // The History window's search field has no next or previous match, and the find bar of the window behind it does not show.
+        // History search filters its list rather than selecting next and previous page matches.
         if item.action == #selector(findNext) || item.action == #selector(findPrevious) {
-            return keyHistoryWindow == nil
+            return activeWindow?.isShowingLibraryHistory != true
         }
         // Chromium's view answers the item before it reaches the app, so here it needs a web view or text view that answers `pasteAsPlainText:`.
         if item.action == #selector(pasteAndMatchStyle(_:)) {

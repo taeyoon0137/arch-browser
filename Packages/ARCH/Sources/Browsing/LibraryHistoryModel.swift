@@ -64,8 +64,15 @@ enum LibraryHistoryClearRange: CaseIterable {
     @Published private(set) var entries: [HistoryEntry] = []
     @Published private(set) var isLoading = false
     @Published private(set) var hasMore = true
+    /// The top visible entry, retained while the sidebar changes between floating and docked hosts.
+    @Published var scrollAnchor: URL?
     @Published var query = "" {
-        didSet { if query != oldValue { reload() } }
+        didSet {
+            if query != oldValue {
+                scrollAnchor = nil
+                reload()
+            }
+        }
     }
 
     let persona: UUID

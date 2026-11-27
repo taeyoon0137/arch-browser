@@ -76,19 +76,19 @@ public enum TintStrength: String, CaseIterable {
 
 /// The current space's tint resolved in the window's appearance. The window passes it to its views in the environment.
 struct SpaceTheme: Equatable {
-    /// Fixed private-window colors, independent of the space tint, desktop, and system appearance.
+    /// Private-window tint and controls, resolved over the system's dark sidebar material.
     enum PrivatePalette {
-        static let backgroundStart = SRGBColor(red: 0.18, green: 0.19, blue: 0.22)
-        static let backgroundEnd = SRGBColor(red: 0.21, green: 0.19, blue: 0.29)
-        static let field = SRGBColor(red: 0.25, green: 0.26, blue: 0.32)
-        static let hover = SRGBColor(red: 0.28, green: 0.28, blue: 0.36)
-        static let selected = SRGBColor(red: 0.34, green: 0.33, blue: 0.44)
-        static let primary = SRGBColor(red: 0.96, green: 0.95, blue: 0.99)
-        static let secondary = SRGBColor(red: 0.83, green: 0.83, blue: 0.90)
-        static let tertiary = SRGBColor(red: 0.74, green: 0.75, blue: 0.83)
-        static let separator = SRGBColor(red: 0.50, green: 0.50, blue: 0.61)
-        static let buttonHover = primary.color.opacity(0.08)
-        static let buttonOn = primary.color.opacity(0.1)
+        static let backgroundStart = SRGBColor(NSColor(displayP3Red: 0.054, green: 0.060, blue: 0.075, alpha: 1), in: .dark)
+        static let backgroundEnd = backgroundStart
+        static let field = SRGBColor(red: 1, green: 1, blue: 1, alpha: 0.07)
+        static let hover = SRGBColor(NSColor(displayP3Red: 0.98, green: 0.984, blue: 1, alpha: 0.15), in: .dark)
+        static let selected = SRGBColor(NSColor(displayP3Red: 0.98, green: 0.984, blue: 1, alpha: 0.2), in: .dark)
+        static let primary = SRGBColor(red: 1, green: 1, blue: 1, alpha: 0.8)
+        static let secondary = SRGBColor(red: 1, green: 1, blue: 1, alpha: 0.5)
+        static let tertiary = SRGBColor(red: 1, green: 1, blue: 1, alpha: 0.3)
+        static let separator = SRGBColor(red: 1, green: 1, blue: 1, alpha: 0.15)
+        static let buttonHover = Color.white.opacity(0.077)
+        static let buttonOn = buttonHover
     }
 
     /// The sidebar keeps the window's appearance while its text reaches WCAG's 4.5:1 contrast for body text on the wash.
@@ -131,11 +131,9 @@ struct SpaceTheme: Equatable {
         sidebarColorScheme = usesOther ? (colorScheme == .dark ? .light : .dark) : colorScheme
     }
 
-    /// Private windows use an opaque gradient; ordinary windows wash the material with their tint.
+    /// Both window kinds wash the system material with their tint at the theme's strength.
     var backgroundColors: [Color] {
-        isPrivate
-            ? [PrivatePalette.backgroundStart.color, PrivatePalette.backgroundEnd.color]
-            : [tint.opacity(strength.opacities.start), tint.opacity(strength.opacities.end)]
+        [tint.opacity(strength.opacities.start), tint.opacity(strength.opacities.end)]
     }
 
     /// A space's symbol color: its tint, or the sidebar's text color where the wash comes too close to that tint.
@@ -150,18 +148,23 @@ struct SRGBColor: Equatable {
     var red: Double
     var green: Double
     var blue: Double
+    var alpha: Double = 1
 
     static let white = SRGBColor(red: 1, green: 1, blue: 1)
     static let black = SRGBColor(red: 0, green: 0, blue: 0)
 
-    var color: Color { Color(.sRGB, red: red, green: green, blue: blue) }
+    var color: Color { Color(.sRGB, red: red, green: green, blue: blue, opacity: alpha) }
 
     /// This color drawn at `opacity` over `base`, blended on the sRGB values as the window draws it.
     func over(_ base: SRGBColor, opacity: Double) -> SRGBColor {
-        SRGBColor(red: red * opacity + base.red * (1 - opacity), green: green * opacity + base.green * (1 - opacity), blue: blue * opacity + base.blue * (1 - opacity))
+        let foregroundAlpha = alpha * opacity
+        let backgroundAlpha = base.alpha * (1 - foregroundAlpha)
+        let resultAlpha = foregroundAlpha + backgroundAlpha
+        guard resultAlpha > 0 else { return SRGBColor(red: 0, green: 0, blue: 0, alpha: 0) }
+        return SRGBColor(red: (red * foregroundAlpha + base.red * backgroundAlpha) / resultAlpha, green: (green * foregroundAlpha + base.green * backgroundAlpha) / resultAlpha, blue: (blue * foregroundAlpha + base.blue * backgroundAlpha) / resultAlpha, alpha: resultAlpha)
     }
 
-    /// Relative luminance as WCAG 2 defines it.
+    /// Relative luminance of the RGB components. Composite translucent colors over their background before comparing contrast.
     var luminance: Double {
         func linear(_ value: Double) -> Double { value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4) }
         return 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
@@ -176,13 +179,13 @@ struct SRGBColor: Equatable {
 extension SRGBColor {
     /// Resolves a dynamic system color as the light or dark appearance draws it.
     init(_ color: NSColor, in scheme: ColorScheme) {
-        var components = (red: 0.0, green: 0.0, blue: 0.0)
+        var components = (red: 0.0, green: 0.0, blue: 0.0, alpha: 1.0)
         NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)?.performAsCurrentDrawingAppearance {
             if let color = color.usingColorSpace(.sRGB) {
-                components = (Double(color.redComponent), Double(color.greenComponent), Double(color.blueComponent))
+                components = (Double(color.redComponent), Double(color.greenComponent), Double(color.blueComponent), Double(color.alphaComponent))
             }
         }
-        self.init(red: components.red, green: components.green, blue: components.blue)
+        self.init(red: components.red, green: components.green, blue: components.blue, alpha: components.alpha)
     }
 }
 

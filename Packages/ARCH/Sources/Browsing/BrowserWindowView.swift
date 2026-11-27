@@ -27,8 +27,8 @@ public struct BrowserWindowView: View {
     /// The window's child windows when the card appeared or the window last changed full screen, such as the full screen toolbar's. Only child windows opened after that, like the card's popovers, keep the card visible.
     @State private var childWindowsBeforePeek: Set<ObjectIdentifier> = []
     @State private var windowReference = WindowReference()
-    /// How far a swipe that moves the docked library has pushed the page, while it does.
-    @State private var librarySwipePush: CGFloat?
+    /// The library's finger travel, shared by both sidebar hosts and the displaced page.
+    @State private var librarySwipeReveal: CGFloat?
     @StateObject private var sidebarDrag = SidebarDragState()
 
     public init(session: BrowserSession, window: BrowserWindowModel) {
@@ -53,14 +53,16 @@ public struct BrowserWindowView: View {
     /// How far the open library pushes the page aside. The page keeps its size, so it moves rather than narrows.
     private var libraryPush: CGFloat {
         guard !windowModel.isPrivate, windowModel.isSidebarVisible, !windowModel.isPageFullscreen else { return 0 }
-        return librarySwipePush ?? (windowModel.isLibraryVisible ? SidebarColumn.libraryWidening : 0)
+        let travel = SidebarView.clampedWidth(sidebarWidth) + 2 * SidebarColumn.dividerMargin
+        return librarySwipeReveal.map { SidebarColumn.libraryWidening * min(travel, max(0, $0)) / travel }
+            ?? (windowModel.isLibraryVisible ? SidebarColumn.libraryWidening : 0)
     }
 
     public var body: some View {
         ZStack {
             HStack(spacing: 0) {
                 if windowModel.isSidebarVisible, !windowModel.isPageFullscreen {
-                    SidebarColumn(session: session, windowButtons: windowButtons, width: SidebarView.clampedWidth(sidebarWidth)) {
+                    SidebarColumn(session: session, windowButtons: windowButtons, width: SidebarView.clampedWidth(sidebarWidth), swipeReveal: $librarySwipeReveal) {
                         sidebarWidth = Double(SidebarView.clampedWidth($0))
                     }
                     // Docking the floating card keeps the sidebar where the card was; only the page resizes.
@@ -118,10 +120,6 @@ public struct BrowserWindowView: View {
         .environmentObject(windowModel)
         .environment(\.addressPillPull, addressPillPull)
         .onPreferenceChange(AddressPillFrameKey.self) { addressPillFrame = $0 }
-        // When the fingers lift, the page settles with the library's spring.
-        .onPreferenceChange(LibrarySwipePushKey.self) { push in
-            if push == nil { withAnimation(SidebarView.pageSpring) { librarySwipePush = nil } } else { librarySwipePush = push }
-        }
         .background(GeometryReader { proxy in
             Color.clear
                 .onAppear { windowSize = proxy.size }
@@ -134,6 +132,10 @@ public struct BrowserWindowView: View {
         // Showing, hiding, or pushing the sidebar aside for the library slides it and resizes the page.
         .animation(SidebarView.pageSpring, value: windowModel.isSidebarVisible)
         .animation(SidebarView.pageSpring, value: windowModel.isLibraryVisible)
+        .onChange(of: windowModel.isLibraryVisible) {
+            withAnimation(SidebarView.pageSpring) { librarySwipeReveal = nil }
+        }
+        .onChange(of: windowModel.isPageFullscreen) { librarySwipeReveal = nil }
         // The window buttons slide away with the sidebar and return with it or with the card. Full screen uses its own buttons.
         .background(WindowButtonsVisibility(isHidden: windowButtons.trailingEdge != nil && !windowModel.isSidebarVisible && !isSidebarPeeking,
                                             slideDistance: windowButtons.trailingEdge == nil ? nil : SidebarView.clampedWidth(sidebarWidth) + Self.pageMargin,
@@ -144,6 +146,7 @@ public struct BrowserWindowView: View {
         }
         // Hiding the sidebar only slides it away; the card appears when the pointer next reaches the window's edge.
         .onChange(of: windowModel.isSidebarVisible) { _, isVisible in
+            librarySwipeReveal = nil
             peekCheck?.cancel()
             guard isVisible, isSidebarPeeking else { return isSidebarPeeking = false }
             withAnimation(SidebarView.pageSpring) { isCardDocking = true }
@@ -177,7 +180,7 @@ public struct BrowserWindowView: View {
                 .onDrop(of: SidebarDropTarget.types, isTargeted: Binding(get: { false }, set: { if $0 { peekSidebar() } })) { _ in false }
             if isSidebarPeeking {
                 // While docking, the card moves to the docked sidebar's place and loses its shadow and edge.
-                SidebarColumn(session: session, windowButtons: buttons, width: width, isFloating: true)
+                SidebarColumn(session: session, windowButtons: buttons, width: width, swipeReveal: $librarySwipeReveal, isFloating: true)
                     .background {
                         ZStack {
                             RoundedRectangle(cornerRadius: Self.cardCornerRadius, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)).shadow(color: .black.opacity(isCardDocking ? 0 : 0.25), radius: 16, y: 4)
@@ -229,7 +232,10 @@ public struct BrowserWindowView: View {
             || (window?.firstResponder is NSText && windowModel.focusedPromptTabID == nil)
         let isInUse = isPointerOverSidebar || isEditingText || windowModel.commandPaletteMode != nil || sidebarDrag.item != nil || RunLoop.main.currentMode == .eventTracking || hasOpenChild
         if isInUse { return scheduleCheckOfPeek() }
-        withAnimation(SidebarView.pageSpring) { isSidebarPeeking = false }
+        withAnimation(SidebarView.pageSpring) {
+            librarySwipeReveal = nil
+            isSidebarPeeking = false
+        }
         // Close the card's library after the card disappears, so the card reopens showing the sidebar.
         DispatchQueue.main.asyncAfter(deadline: .now() + SidebarView.pageSpringSettleDelay) {
             guard !windowModel.isSidebarVisible, !isSidebarPeeking, windowModel.isLibraryVisible else { return }
@@ -287,8 +293,9 @@ struct WindowButtonsVisibility: NSViewRepresentable {
             let buttons = Self.types.compactMap { type in window.standardWindowButton(type).map { (type, $0) } }
             let wasHidden = coordinator.isHidden
             coordinator.isHidden = isHidden
-            // An update that changes nothing does not interrupt a slide.
-            if wasHidden == isHidden, slideDistance != nil, !coordinator.restingOrigins.isEmpty { return }
+            // AppKit can temporarily replace these buttons with system status controls.
+            // Repeated updates must neither interrupt a slide nor override that visibility.
+            if wasHidden == isHidden || (wasHidden == nil && !isHidden) { return }
             guard let wasHidden, wasHidden != isHidden, let distance = slideDistance, #available(macOS 15, *) else {
                 // A slide in progress must not apply its final state afterwards.
                 coordinator.generation += 1
@@ -355,9 +362,7 @@ struct SpaceBackgroundView: View {
 
     var body: some View {
         ZStack {
-            if !theme.isPrivate {
-                WindowMaterialView(cornerRadius: cornerRadius)
-            }
+            WindowMaterialView(cornerRadius: cornerRadius)
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .fill(LinearGradient(colors: theme.backgroundColors, startPoint: .topLeading, endPoint: .bottomTrailing))
         }

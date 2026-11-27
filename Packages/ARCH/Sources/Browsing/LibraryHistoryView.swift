@@ -5,37 +5,50 @@ import History
 import SwiftUI
 
 struct LibraryHistoryView: View {
-    @StateObject private var model: LibraryHistoryModel
+    @ObservedObject private var model: LibraryHistoryModel
     @EnvironmentObject private var windowModel: BrowserWindowModel
-    @State private var isClearHovering = false
+    @Environment(\.sidebarIsFloating) private var isFloating
+    @Environment(\.colorScheme) private var colorScheme
     @State private var contentFrame = CGRect.zero
     @State private var listHeight: CGFloat = 0
+    @FocusState private var isSearchFocused: Bool
     private static let scrollSpace = "LibraryHistoryScroll"
 
-    init(store: HistoryStore, persona: UUID) {
-        _model = StateObject(wrappedValue: LibraryHistoryModel(store: store, persona: persona))
+    init(model: LibraryHistoryModel) {
+        _model = ObservedObject(wrappedValue: model)
+    }
+
+    /// The departing floating host must not overwrite the docked host's scroll position or take its focus.
+    private var isActiveHost: Bool {
+        model.persona == windowModel.personaID && windowModel.isLibraryVisible
+            && windowModel.libraryTab == .history && !windowModel.isPageFullscreen
+            && (isFloating ? !windowModel.isSidebarVisible : windowModel.isSidebarVisible)
+    }
+
+    private var scrollAnchor: Binding<URL?> {
+        Binding(get: { model.scrollAnchor }, set: { id in
+            if isActiveHost, model.scrollAnchor != id { model.scrollAnchor = id }
+        })
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("History", bundle: .module)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button(localized("Clear History…"), action: confirmClear)
-                    .buttonStyle(.plain)
-                    .font(.system(size: 13))
-                    .foregroundStyle(isClearHovering ? .primary : .secondary)
-                    .onHover { isClearHovering = $0 }
+        VStack(alignment: .leading, spacing: SidebarView.rowSpacing) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 18)
+                    .accessibilityHidden(true)
+                TextField(localized("Search History"), text: $model.query)
+                    .focused($isSearchFocused)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 14))
+                    .onExitCommand { isSearchFocused = false }
             }
             .padding(.horizontal, 10)
-            .padding(.bottom, 4)
-            TextField(localized("Search History"), text: $model.query)
-                .textFieldStyle(.roundedBorder)
-                .font(.system(size: 13))
-                .padding(.horizontal, 6)
-                .padding(.bottom, 4)
+            .frame(height: 36)
+            .background(RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .fill(SidebarFill.field.color(in: colorScheme)))
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     ForEach(model.days) { day in
@@ -49,6 +62,7 @@ struct LibraryHistoryView: View {
                         ForEach(day.entries) { entry in
                             LibraryHistoryRow(entry: entry, open: { background in open(entry, background: background) },
                                               openWindow: { openWindow(entry) }, delete: { model.delete(entry) })
+                                .id(entry.id)
                         }
                     }
                     if model.hasMore {
@@ -56,7 +70,10 @@ struct LibraryHistoryView: View {
                             .controlSize(.small)
                             .frame(maxWidth: .infinity)
                             .padding(8)
-                            .task(id: model.entries.count) { await model.loadNextPage() }
+                            .task(id: model.entries.count) {
+                                // The shared model's read must survive removal of either sidebar host.
+                                _ = Task { [model] in await model.loadNextPage() }
+                            }
                     } else if model.entries.isEmpty {
                         Text(model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? localized("No History") : localized("No Results"))
                             .font(.system(size: 13))
@@ -65,6 +82,7 @@ struct LibraryHistoryView: View {
                             .padding(.vertical, 16)
                     }
                 }
+                .scrollTargetLayout()
                 .background(GeometryReader { proxy in
                     let frame = proxy.frame(in: .named(Self.scrollSpace))
                     Color.clear
@@ -72,6 +90,7 @@ struct LibraryHistoryView: View {
                         .onChange(of: frame) { contentFrame = $1 }
                 })
             }
+            .scrollPosition(id: scrollAnchor, anchor: .top)
             .scrollIndicators(.never)
             .coordinateSpace(name: Self.scrollSpace)
             .mask(ScrollEdgeFade(hiddenAbove: -contentFrame.minY, hiddenBelow: contentFrame.maxY - listHeight))
@@ -80,6 +99,16 @@ struct LibraryHistoryView: View {
                     .onAppear { listHeight = proxy.size.height }
                     .onChange(of: proxy.size.height) { listHeight = $1 }
             })
+            LibraryToolRow(symbol: "trash", title: localized("Clear History…"), action: confirmClear)
+        }
+        .onChange(of: windowModel.isLibraryVisible) { _, isVisible in
+            if !isVisible { isSearchFocused = false }
+        }
+        .onChange(of: isActiveHost) { _, isActive in
+            if !isActive { isSearchFocused = false }
+        }
+        .onChange(of: windowModel.libraryHistorySearchRequest) { _, _ in
+            if isActiveHost, windowModel.isShowingLibraryHistory { isSearchFocused = true }
         }
     }
 
@@ -132,7 +161,7 @@ private struct LibraryHistoryRow: View {
 
     var body: some View {
         Button { open(NSEvent.modifierFlags.contains(.command)) } label: {
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 Group {
                     if let icon {
                         Image(nsImage: icon).resizable().scaledToFit()
@@ -141,7 +170,7 @@ private struct LibraryHistoryRow: View {
                     }
                 }
                 .frame(width: 16, height: 16)
-                .frame(width: 32, height: 32)
+                .frame(width: 18, height: 32)
                 .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(entry.title.isEmpty ? entry.url.host ?? entry.url.absoluteString : entry.title)
@@ -160,7 +189,8 @@ private struct LibraryHistoryRow: View {
                     .foregroundStyle(.secondary)
                     .fixedSize()
             }
-            .padding(6)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
             .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(isHovering ? SidebarFill.hover.color(in: colorScheme) : .clear))
             .contentShape(Rectangle())
         }

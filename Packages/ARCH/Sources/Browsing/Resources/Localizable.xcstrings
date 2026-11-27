@@ -971,6 +971,16 @@
         }
       }
     },
+    "Clear Downloads" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다운로드 내역 지우기"
+          }
+        }
+      }
+    },
     "Clear Home" : {
       "localizations" : {
         "ko" : {

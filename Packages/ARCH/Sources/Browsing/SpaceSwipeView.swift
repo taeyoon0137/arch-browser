@@ -88,7 +88,8 @@ final class SpaceSwipeNSView: NSView {
         lastTimestamp = event.timestamp
         if event.phase == .ended || event.phase == .cancelled {
             isTracking = false
-            onEnd?(travel.width, event.phase == .cancelled ? 0 : velocity)
+            // A cancelled gesture returns to its starting page or library state.
+            onEnd?(event.phase == .cancelled ? 0 : travel.width, event.phase == .cancelled ? 0 : velocity)
         } else {
             onChange?(travel.width)
         }

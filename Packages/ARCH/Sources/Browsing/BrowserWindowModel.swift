@@ -36,6 +36,7 @@ public enum BrowserWindowKind {
     }
     /// The AppKit window, set when it is created. Window sheets, printing, export, and sharing use it.
     public weak var nsWindow: NSWindow?
+    private var recentPreviewSourceClick: (point: CGPoint, timestamp: TimeInterval, windowNumber: Int)?
     /// The window's frame outside full screen, in screen coordinates: the saved one, where the window opens, then the one the window controller records as the window moves and resizes. `nil` until the window opens, when the window has no saved frame.
     var restorableFrame: CGRect?
 
@@ -68,6 +69,10 @@ public enum BrowserWindowKind {
     }
     /// The page in the preview panel over the page area, or nil while no panel shows. Its web contents belongs to no tab.
     @Published private(set) var preview: PagePreview?
+    /// User dismissal fades the panel before its live page closes. Programmatic teardown stays immediate.
+    @Published private(set) var isPreviewDismissing = false
+    private var previewDismissal: DispatchWorkItem?
+    private var previewDismissalReleasedFocus = false
     /// Hiding the sidebar closes a sidebar panel: its page ends with the docked column, and the floating card does not take it over.
     @Published public var isSidebarVisible = true {
         didSet { if !isSidebarVisible { closeSidebarPanel() } }
@@ -79,6 +84,10 @@ public enum BrowserWindowKind {
             if isLibraryVisible && libraryTab == .downloads { session.markDownloadsSeen() }
         }
     }
+    /// Requests focus in the library's history search without changing its query.
+    @Published private(set) var libraryHistorySearchRequest = 0
+    /// The current Persona's history state survives replacement of the sidebar's view host.
+    private var retainedLibraryHistory: LibraryHistoryModel?
     /// Opening the library marks downloads as seen only when Downloads is selected.
     @Published public var isLibraryVisible = false {
         didSet {
@@ -647,6 +656,30 @@ public enum BrowserWindowKind {
 
     // MARK: Previews
 
+    /// Preserve the input location while a renderer delivers the resulting navigation asynchronously.
+    func recordPreviewSourceEvent(_ event: NSEvent) {
+        guard let window = nsWindow, event.window === window,
+              [.leftMouseDown, .leftMouseUp, .otherMouseDown, .otherMouseUp].contains(event.type) else {
+            recentPreviewSourceClick = nil
+            return
+        }
+        recentPreviewSourceClick = (event.locationInWindow, event.timestamp, window.windowNumber)
+    }
+
+    private func previewPresentationPoint() -> CGPoint? {
+        guard let window = nsWindow else { return nil }
+        if let event = NSApp.currentEvent, event.window === window,
+           [.leftMouseDown, .leftMouseUp, .otherMouseDown, .otherMouseUp].contains(event.type) {
+            let elapsed = ProcessInfo.processInfo.systemUptime - event.timestamp
+            if elapsed >= 0 && elapsed <= 0.5 { return event.locationInWindow }
+        }
+        if let click = recentPreviewSourceClick, click.windowNumber == window.windowNumber {
+            let elapsed = ProcessInfo.processInfo.systemUptime - click.timestamp
+            if elapsed >= 0 && elapsed <= 0.5 { return click.point }
+        }
+        return window.mouseLocationOutsideOfEventStream
+    }
+
     /// Whether an internal page or the preview panel covers the selected tab's page, so that the commands for the page in front, and the site settings popover, leave the tab alone.
     var isSelectedPageCovered: Bool { internalPage != nil || preview != nil }
 
@@ -655,19 +688,28 @@ public enum BrowserWindowKind {
         showPreview(of: favorite.url, engine: session.defaultEngine, in: favorite.resolvedPersonaID)
     }
 
-    /// Shows `url` in the panel, in place of any other preview, in a web contents of the Persona's runtime for `engine` that no tab owns. A preview opened with the same address, Persona and requested engine stays as it is. The preview refuses the page's downloads, so closing the panel always closes the page at once.
+    /// Shows `url` in the panel, in place of any other preview, in a web contents of the Persona's runtime for `engine` that no tab owns. A preview opened with the same address, Persona and requested engine stays as it is. The preview refuses downloads. User dismissal closes its page after the fade; programmatic teardown is immediate.
     func showPreview(of url: URL, engine: EngineKind, in personaID: Persona.ID) {
         guard !isPrivate, session.personas.contains(where: { $0.id == personaID }) else { return }
-        if let preview, preview.openedURL == url, preview.personaID == personaID, preview.requestedEngine == engine { return }
+        if let preview, preview.openedURL == url, preview.personaID == personaID, preview.requestedEngine == engine {
+            cancelPreviewDismissal(restoringFocus: true)
+            return
+        }
+        let sourcePoint = previewPresentationPoint()
+        let source = previewPresentationSource(in: personaID, opener: nil, point: sourcePoint)
         guard let runtime = session.runtime(for: engine, in: personaID) else { return NSSound.beep() }
         let webContents = runtime.browser.createWebContents(EngineWebContentsConfiguration(initialURL: url))
-        showPreview(webContents, openedURL: url, in: personaID, requestedEngine: engine)
+        showPreview(webContents, openedURL: url, in: personaID, requestedEngine: engine,
+                    presentationSourcePoint: sourcePoint, presentationSource: source)
     }
 
     /// Takes an engine's new page into Peek without reloading, preserving the native request and opener.
     func showPreview(_ webContents: any EngineWebContents, openedURL: URL, in personaID: Persona.ID,
-                     requestedEngine: EngineKind, opener: (any EngineWebContents)? = nil) {
+                     requestedEngine: EngineKind, opener: (any EngineWebContents)? = nil, presentationSourcePoint: CGPoint? = nil,
+                     presentationSource: PagePreview.PresentationSource? = nil) {
         guard !isPrivate, session.personas.contains(where: { $0.id == personaID }) else { return }
+        let sourcePoint = presentationSourcePoint ?? previewPresentationPoint()
+        let source = presentationSource ?? (presentationSourcePoint == nil ? previewPresentationSource(in: personaID, opener: opener, point: sourcePoint) : nil)
         closePreview()
         // The panel covers the page that a search, a region capture, or the question popover belongs to, so all three end.
         hideFindBar()
@@ -675,6 +717,9 @@ public enum BrowserWindowKind {
         closePageQuestion()
         guard let runtime = session.runtime(for: webContents.engineKind, in: personaID) else { return NSSound.beep() }
         let preview = PagePreview(webContents: webContents, personaID: personaID, requestedEngine: requestedEngine, openedURL: openedURL)
+        if let point = sourcePoint {
+            preview.presentationSourceRectInWindow = CGRect(x: point.x - 40, y: point.y - 20, width: 80, height: 40)
+        }
         preview.opener = opener
         // A page opened by the preview keeps the preview as its native opener. Both become tabs; the panel leaves on the next run loop turn, after the engine's callback.
         preview.openNewTab = { [weak self, weak preview] popup in
@@ -693,9 +738,28 @@ public enum BrowserWindowKind {
             self.session.permissionAnswers.denyWithoutAsking(request, personaID: personaID, in: runtime.context, completion: completion)
         }
         preview.didClose = { [weak self] in self?.closePreview() }
+        preview.presentationDidBecomeReady = { [weak self, weak preview] in
+            guard let self, let preview, self.preview === preview else { return }
+            self.objectWillChange.send()
+            if let window = self.nsWindow, window.firstResponder === window { self.focusPage() }
+        }
+        if let source {
+            preview.preparePresentation(from: source) { [weak self, weak preview] in
+                guard let self, let preview, self.preview === preview, !self.isPreviewDismissing,
+                      let tab = source.tab else { return false }
+                return self.shows(tab) && tab.personaID == personaID && self.nsWindow === source.window
+            }
+        }
         self.preview = preview
         nsWindow?.makeFirstResponder(nil)
         focusPage()
+    }
+
+    private func previewPresentationSource(in personaID: Persona.ID, opener: (any EngineWebContents)?, point: CGPoint?) -> PagePreview.PresentationSource? {
+        guard preview == nil, internalPage == nil, let window = nsWindow, let point else { return nil }
+        let tab = opener.flatMap { page in session.allTabs.first { $0.webContents === page } } ?? selectedTab
+        guard let tab, tab.personaID == personaID, shows(tab) else { return nil }
+        return PagePreview.PresentationSource(tab: tab, window: window, point: point)
     }
 
     /// Transfers the live page into a tab in the current space, retaining its form state, history, engine, and opener.
@@ -725,14 +789,54 @@ public enum BrowserWindowKind {
                              pinned: false, select: false, opener: preview.opener, preferredEngine: preview.requestedEngine)
     }
 
-    /// Closes the panel and its page.
+    /// Dismisses a panel without retiring its page halfway through its presentation animation.
+    func dismissPreview() {
+        guard let preview, !isPreviewDismissing else { return }
+        guard preview.isPresentationReady else { return closePreview() }
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return closePreview() }
+        isPreviewDismissing = true
+        let pageView = preview.webContents.view
+        if let window = nsWindow, let responder = window.firstResponder as? NSView,
+           responder.isDescendant(of: pageView) {
+            // The fading page takes neither pointer events nor typing. App fields keep their own focus.
+            previewDismissalReleasedFocus = window.makeFirstResponder(nil)
+        }
+        let dismissal = DispatchWorkItem { [weak self, weak preview] in
+            guard let self, let preview, self.preview === preview, self.isPreviewDismissing else { return }
+            self.closePreview()
+        }
+        previewDismissal = dismissal
+        let duration = preview.presentationSourceRectInWindow == nil ? PagePreviewOverlay.fadeDuration : PagePreviewPanel.dismissalDuration
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: dismissal)
+    }
+
+    private func cancelPreviewDismissal(restoringFocus: Bool = false) {
+        let shouldRestoreFocus = restoringFocus && previewDismissalReleasedFocus && previewDismissalStillOwnsFocus
+        previewDismissal?.cancel()
+        previewDismissal = nil
+        isPreviewDismissing = false
+        previewDismissalReleasedFocus = false
+        if shouldRestoreFocus { focusPage() }
+    }
+
+    private var previewDismissalStillOwnsFocus: Bool {
+        guard let window = nsWindow else { return false }
+        return window.firstResponder === window
+    }
+
+    /// Closes the panel and its page immediately for engine and window teardown.
     func closePreview() {
         removePreview(closingPage: true)
     }
 
     /// Removes the panel and, with `closingPage`, closes its page; without, a tab has taken the page. Keyboard focus returns to the selected tab's page when it was in the panel, unless the click that closed the panel gave it to a field.
     private func removePreview(closingPage: Bool) {
+        let releasedFocus = previewDismissalReleasedFocus && previewDismissalStillOwnsFocus
+        cancelPreviewDismissal()
         guard let preview else { return }
+        let pendingPresentationOwnedFocus = !preview.isPresentationReady && previewDismissalStillOwnsFocus
+        preview.cancelPresentationPreparation()
+        preview.presentationDidBecomeReady = nil
         self.preview = nil
         let view = preview.webContents.view
         let hadFocus = (view.window?.firstResponder as? NSView)?.isDescendant(of: view) == true
@@ -742,7 +846,7 @@ public enum BrowserWindowKind {
             preview.webContents.uiDelegate = nil
             session.retire(preview.webContents, of: preview.personaID)
         }
-        if hadFocus { focusPage(leaving: view) }
+        if hadFocus || releasedFocus || pendingPresentationOwnedFocus { focusPage(leaving: view) }
     }
 
     // MARK: Tabs
@@ -788,7 +892,7 @@ public enum BrowserWindowKind {
 
     /// The preview panel or an internal page is what the user sees, so it closes instead of the tab under it. A window with no tab selected closes itself while another browser window stays open.
     public func closeSelectedTab() {
-        if preview != nil { return closePreview() }
+        if preview != nil { return dismissPreview() }
         if internalPage != nil { return closeInternalPage() }
         if let tab = selectedTab { return session.requestCloseTab(tab) }
         if session.windows.count > 1 { nsWindow?.performClose(nil) }
@@ -912,7 +1016,8 @@ public enum BrowserWindowKind {
     /// Returns keyboard focus to the page after the palette or the question popover closes. Runs after the next layout pass so a new tab's view is in the window, and leaves a page that another window has taken in the meantime alone. Given the view that focus is `leaving`, focus moves only while it is still there or nowhere, so a field the user clicked in the meantime keeps it.
     func focusPage(leaving previous: NSView? = nil) {
         DispatchQueue.main.async { [weak self] in
-            guard let self, let view = self.preview?.webContents.view ?? self.selectedTab?.webContents.view,
+            guard let self, !self.isPreviewDismissing, self.preview?.isPresentationReady != false,
+                  let view = self.preview?.webContents.view ?? self.selectedTab?.webContents.view,
                   let window = view.window, window === self.nsWindow else { return }
             if let previous, let responder = window.firstResponder, responder !== window,
                (responder as? NSView)?.isDescendant(of: previous) != true { return }
@@ -1428,6 +1533,13 @@ public enum BrowserWindowKind {
 
     // MARK: Sidebar and library
 
+    var libraryHistoryModel: LibraryHistoryModel {
+        if let model = retainedLibraryHistory, model.persona == personaID { return model }
+        let model = LibraryHistoryModel(store: session.history, persona: personaID)
+        retainedLibraryHistory = model
+        return model
+    }
+
     public func toggleSidebar() { isSidebarVisible.toggle() }
 
     /// A small window shows the library in its main window. A main window with its sidebar hidden reveals both together.
@@ -1446,6 +1558,29 @@ public enum BrowserWindowKind {
             return
         }
         isLibraryVisible.toggle()
+    }
+
+    /// History menu commands use the same list as the library's History tab.
+    public func showHistoryInLibrary() {
+        guard !isPrivate, kind == .main else { return }
+        guard nsWindow?.attachedSheet == nil else { return }
+        commandPaletteMode = nil
+        exitPageFullscreen()
+        libraryTab = .history
+        isSidebarVisible = true
+        isLibraryVisible = true
+    }
+
+    /// Find searches history while that list is shown, otherwise the caller may search the page.
+    public func focusLibraryHistorySearch() -> Bool {
+        guard isShowingLibraryHistory else { return false }
+        guard nsWindow?.attachedSheet == nil else { return true }
+        libraryHistorySearchRequest &+= 1
+        return true
+    }
+
+    public var isShowingLibraryHistory: Bool {
+        !isPrivate && kind == .main && !isPageFullscreen && isSidebarVisible && isLibraryVisible && libraryTab == .history
     }
 
     // MARK: Navigation

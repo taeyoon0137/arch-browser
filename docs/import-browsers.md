@@ -235,7 +235,7 @@ Run from the bundle launched through `open`, on a test Persona or a fresh Applic
 
 1. Without Full Disk Access, the Chrome and Safari sections ask for access, and Open System Settings opens the pane their definitions name. Note which list in Privacy & Security shows Arch after Chrome's denial, whether Full Disk Access alone opens Chrome, and whether `access(2)` reports `EPERM` for both; set Chrome's setting in its definition and in this note from the result. After the grant, returning to Arch lists their profiles, or the sheet says to quit and reopen.
 2. An Arc profile imported into a new Persona brings its spaces with their names and tints, their pinned tabs and folders in order, and its favorites. Importing again after moving an imported pinned tab to another page and renaming an imported space adds nothing, even from another Persona's window. Opening an imported pinned tab for the first time adds a visit to History, and with Tab Names on the tab may get a suggested name.
-3. A Chrome profile brings the bar's bookmarks as favorites, its folders as pinned folders in a space named Chrome, history in the History window, and its shortcuts in Settings ▸ Site Search.
+3. A Chrome profile brings the bar's bookmarks as favorites, its folders as pinned folders in a space named Chrome, history in the Library’s History tab, and its shortcuts in Settings ▸ Site Search.
 4. With Full Disk Access, Safari brings the Favorites bar, its folders in a space named Safari, and history, without the reading list.
 5. The search engine choice changes Settings ▸ General.
 6. Every imported item survives relaunch, and File ▸ Import Bookmarks and History… still imports an exported HTML file.

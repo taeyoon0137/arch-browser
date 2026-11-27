@@ -33,7 +33,7 @@ struct CommandPaletteView: View {
     /// The row that Up and Down selected. Its identity selects a matching row on redraw. Nil, or a row that has left the list, selects the first row; typing selects it again.
     @State private var selectedRow: PaletteItem?
     @State private var argumentCommand: Attributed<PluginCommand>?
-    @State private var resultsHeight: CGFloat = 0
+    @State private var resultsHeight: CGFloat?
 
     /// Matching commands of the enabled plugins of the window's Persona.
     private var pluginCommands: [Attributed<PluginCommand>] {
@@ -265,6 +265,8 @@ struct CommandPaletteView: View {
     private func results(_ items: [PaletteItem], availableHeight: CGFloat) -> some View {
         let selected = selectedIndex(in: items)
         let selectedID = items[selected].id
+        let maximumHeight = max(80, min(420, availableHeight))
+        let panel = RoundedRectangle(cornerRadius: PaletteRowHighlight.panelRadius, style: .continuous)
         return ScrollViewReader { reader in
             ScrollView {
                 VStack(spacing: 2) {
@@ -272,20 +274,21 @@ struct CommandPaletteView: View {
                         rowView(for: row, isSelected: index == selected)
                             .paletteAction { perform(row) }
                             .accessibilityAddTraits(index == selected ? .isSelected : [])
+                            .padding(.top, index == 0 ? PaletteRowHighlight.panelInset : 0)
+                            .padding(.bottom, index == items.count - 1 ? PaletteRowHighlight.panelInset : 0)
                             .id(row.id)
                     }
                 }
-                .padding(PaletteRowHighlight.panelInset)
-                .background(GeometryReader { geometry in
-                    Color.clear.preference(key: PaletteResultsHeightKey.self, value: geometry.size.height)
-                })
+                .padding(.horizontal, PaletteRowHighlight.panelInset)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { resultsHeight = $0 }
             }
-            .frame(height: min(max(80, min(420, availableHeight)), resultsHeight > 0 ? resultsHeight : CGFloat(items.count) * 40))
-            .onPreferenceChange(PaletteResultsHeightKey.self) { resultsHeight = $0 }
+            .contentMargins(.vertical, PaletteRowHighlight.panelRadius, for: .scrollIndicators)
+            .frame(height: min(resultsHeight ?? maximumHeight, maximumHeight))
             .onChange(of: selectedID) { _, id in reader.scrollTo(id) }
             .onChange(of: resultsHeight) { reader.scrollTo(selectedID) }
             .onChange(of: text) { reader.scrollTo(items[0].id, anchor: .top) }
-            .modifier(PaletteSurface(shape: RoundedRectangle(cornerRadius: PaletteRowHighlight.panelRadius, style: .continuous)))
+            .clipShape(panel)
+            .modifier(PaletteSurface(shape: panel))
         }
     }
 
@@ -345,11 +348,6 @@ struct CommandPaletteView: View {
         .onChange(of: text) { selectedRow = nil }
         .task(id: text) { await loadHistorySuggestions() }
     }
-}
-
-private struct PaletteResultsHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 /// One row of the palette's results panel.

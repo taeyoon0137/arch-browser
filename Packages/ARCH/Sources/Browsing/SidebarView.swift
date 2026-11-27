@@ -170,18 +170,20 @@ struct SidebarView: View {
     /// Private windows have one flat list of their own tabs, without Persona content or drop targets.
     private var privateTabs: some View {
         VStack(alignment: .leading, spacing: Self.rowSpacing) {
-            Label(localized("Private Browsing"), systemImage: "eye.slash")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 10)
-                .frame(height: 36)
-                .overlay(alignment: .bottom) {
-                    Rectangle()
-                        .fill(SpaceTheme.PrivatePalette.separator.color)
-                        .frame(height: 1)
-                        .padding(.horizontal, 10)
-                        .accessibilityHidden(true)
-                }
+            HStack(spacing: 8) {
+                Text(Image(systemName: "eye.slash"))
+                    .frame(width: 18)
+                    .accessibilityHidden(true)
+                Text(localized("Private Browsing"))
+                    .lineLimit(1)
+            }
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(.white.opacity(0.3))
+            .padding(.vertical, 4)
+            .padding(.leading, 5)
+            .padding(.trailing, 6)
+            .background(Color(white: 0.11).opacity(0.3), in: Capsule())
+            .padding(.horizontal, 5)
             ScrollView {
                 LazyVStack(spacing: 2) {
                     ForEach(windowModel.privateTabs) { tab in
@@ -295,17 +297,17 @@ struct SidebarColumn: View {
     @EnvironmentObject private var windowModel: BrowserWindowModel
     let windowButtons: WindowButtonMetrics
     let width: CGFloat
+    /// The window shares this finger travel with the page so both settle in one transaction.
+    @Binding var swipeReveal: CGFloat?
     var isFloating = false
     var onResize: (CGFloat) -> Void = { _ in }
-    /// How far a swipe has opened the library, from 0 to its width, while the fingers are down.
-    @State private var swipeReveal: CGFloat?
 
     private var libraryWidth: CGFloat { width }
     private var peek: CGFloat { isFloating ? 0 : Self.libraryPeek }
     private var gap: CGFloat { 2 * Self.dividerMargin }
     /// How far the library moves in: its width and the gap after it.
     private var travel: CGFloat { libraryWidth + gap }
-    private var reveal: CGFloat { swipeReveal ?? (windowModel.isLibraryVisible ? travel : 0) }
+    private var reveal: CGFloat { swipeReveal.map { min(travel, max(0, $0)) } ?? (windowModel.isLibraryVisible ? travel : 0) }
     private var progress: CGFloat { reveal / travel }
     /// How much the docked column widens while the library is open.
     private var widening: CGFloat { isFloating ? 0 : Self.libraryWidening }
@@ -372,8 +374,6 @@ struct SidebarColumn: View {
                                    onEnd: { distance, velocity in finishLibrarySwipe(opens: !(distance < -travel * 0.3 || velocity < -300)) }))
         // The window lays the column out at the sidebar's width; the open library's widening draws past it, where the page has moved aside.
         .frame(width: width, alignment: .leading)
-        // While fingers move the library, the page follows them; otherwise it follows `isLibraryVisible`.
-        .preference(key: LibrarySwipePushKey.self, value: isFloating ? nil : swipeReveal.map { widening * $0 / travel })
         // The handle covers the gap between the sidebar's controls and the page, including the sidebar's margin and the gap outside it.
         .overlay(alignment: .trailing) {
             if progress == 0, !isFloating {
@@ -384,7 +384,6 @@ struct SidebarColumn: View {
         }
         .animation(SidebarView.pageSpring, value: windowModel.isLibraryVisible)
         .environment(\.sidebarWidth, width)
-        .onChange(of: windowModel.isLibraryVisible) { swipeReveal = nil }
         // On a strong tint, the sidebar's text and icons may take the other appearance to stay readable.
         .modifier(SidebarAppearance())
     }
@@ -394,15 +393,6 @@ struct SidebarColumn: View {
             swipeReveal = nil
             windowModel.isLibraryVisible = opens
         }
-    }
-}
-
-/// How far a swipe that moves the docked library has pushed the page aside, or nil while no swipe moves it.
-struct LibrarySwipePushKey: PreferenceKey {
-    static let defaultValue: CGFloat? = nil
-
-    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
-        value = nextValue() ?? value
     }
 }
 

@@ -375,6 +375,16 @@ final class EngineRuntime {
     /// The window that sidebar commands act on: the last main window, or, while none is open, the front one of the main windows that reopen from `windowsToReopen` (window rule 7).
     public func sidebarTarget() -> BrowserWindowModel { lastMainWindow ?? reopenWindows(windowsToReopen)[0] }
 
+    /// History stays in the requesting Persona, including requests from a small window.
+    /// Private windows read the default Persona's saved history in a regular window.
+    public func historyTarget() -> BrowserWindowModel {
+        let persona = activeWindow.flatMap { $0.isPrivate ? nil : $0.personaID } ?? Persona.defaultID
+        if let window = windows.first(where: { $0.kind == .main && !$0.isPrivate && $0.personaID == persona }) { return window }
+        let space = preferredSpace(in: persona)
+        let record = SessionSnapshot.WindowRecord(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: true)
+        return makeWindow(from: record, kind: .main)
+    }
+
     /// Opening a notification selects its still-waiting conversation without navigating the user's page: in a window that already shows it, else in a main window of the owner's Persona, one without a panel first, whose composer draft stays kept otherwise.
     func showWaitingAgent(_ ownerID: UUID) {
         guard let agents, agents.pendingAttention(for: ownerID) else { return }
@@ -430,7 +440,7 @@ final class EngineRuntime {
         return reopened
     }
 
-    /// Creates a hidden window of `kind` as `record` describes it, on the first space when the record's space is gone. A main window without a frame cascades from the main window that last became main; a small window opens near the top center of the pointer's screen. It goes first in `windows`, as it is about to come to the front, before its views exist.
+    /// Creates a hidden window of `kind` as `record` describes it, on the first space when the record's space is gone. A main window without a frame cascades from the main window that last became main; a small window centers its remembered size on the opening pointer or cascades from another small window. It goes first in `windows`, as it is about to come to the front, before its views exist.
     func makeWindow(from record: SessionSnapshot.WindowRecord, kind: BrowserWindowKind) -> BrowserWindowModel {
         let source = windows.first { $0.kind == kind }?.nsWindow
         var record = record
@@ -617,12 +627,12 @@ final class EngineRuntime {
     /// An address Arch opens keeps its requested engine if this Persona temporarily needs a fallback.
     func openSmallWindow(url: URL?, engine: EngineKind, spaceID: UUID, personaID: Persona.ID) -> BrowserWindowModel {
         let contents = makeWebContents(url: url, engine: engine, state: nil, in: personaID)
-        return openSmallWindow(contents, spaceID: spaceID, personaID: personaID, preferredEngine: engine)
+        return openSmallWindow(contents, spaceID: spaceID, personaID: personaID, preferredEngine: engine, isInitialPresentation: true)
     }
 
     /// Opens a small window, made key and ordered front, on a new tab for `webContents`, which a runtime of the Persona created. The tab moves to the space `spaceID`, or to the Persona's preferred space when that space belongs to another Persona. It stays in `tabs`, so that sheets, permissions, downloads, Now Playing, and `session.json` handle it as any other, while its space's list leaves it out.
     @discardableResult
-    func openSmallWindow(_ webContents: any EngineWebContents, spaceID: UUID, personaID: Persona.ID, opener: (any EngineWebContents)? = nil, preferredEngine: EngineKind? = nil) -> BrowserWindowModel {
+    func openSmallWindow(_ webContents: any EngineWebContents, spaceID: UUID, personaID: Persona.ID, opener: (any EngineWebContents)? = nil, preferredEngine: EngineKind? = nil, isInitialPresentation: Bool = false) -> BrowserWindowModel {
         if let window = windows.first(where: { $0.privateSessionID == personaID }) {
             window.showOpenedPage(webContents, personaID: personaID, opener: opener, preferredEngine: preferredEngine)
             return window
@@ -635,7 +645,10 @@ final class EngineRuntime {
         tabs.append(tab)
         let window = makeWindow(from: SessionSnapshot.WindowRecord(id: UUID(), frame: nil, currentSpaceID: spaceID, selectedTabID: nil, isSidebarVisible: false), kind: .small)
         window.selectTab(tab.id)
-        windowControllers.first { $0.model === window }?.showWindow(nil)
+        if let controller = windowControllers.first(where: { $0.model === window }) {
+            controller.isInitialSmallPresentation = isInitialPresentation
+            controller.showWindow(nil)
+        }
         window.nsWindow?.makeKeyAndOrderFront(nil)
         window.focusPage()
         return window

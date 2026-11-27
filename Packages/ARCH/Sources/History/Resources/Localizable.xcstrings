@@ -41,22 +41,22 @@
         }
       }
     },
-    "Clearing removes the pages last visited in this range from the History window and address suggestions, in the Persona you choose or in every Persona." : {
+    "Clearing removes the pages last visited in this range from browsing history and address suggestions, in the Persona you choose or in every Persona." : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "선택한 페르소나 또는 모든 페르소나에서 이 기간에 마지막으로 방문한 페이지가 방문 기록 윈도우와 주소 제안에서 제거됩니다."
+            "value" : "선택한 페르소나 또는 모든 페르소나에서 이 기간에 마지막으로 방문한 페이지가 방문 기록과 주소 제안에서 제거됩니다."
           }
         }
       }
     },
-    "Clearing removes the pages last visited in this range from the History window and address suggestions." : {
+    "Clearing removes the pages last visited in this range from browsing history and address suggestions." : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "이 기간에 마지막으로 방문한 페이지가 방문 기록 윈도우와 주소 제안에서 제거됩니다."
+            "value" : "이 기간에 마지막으로 방문한 페이지가 방문 기록과 주소 제안에서 제거됩니다."
           }
         }
       }

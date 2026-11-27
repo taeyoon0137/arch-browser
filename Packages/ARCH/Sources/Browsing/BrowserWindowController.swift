@@ -1,12 +1,19 @@
 // The AppKit window of one browser window. The session creates each one as it opens a window and releases it once the window closes.
 import AppKit
 import Combine
+import QuartzCore
 import SwiftUI
 
 /// The AppKit window of one `BrowserWindowModel`: a titled window with an empty unified toolbar that hosts `BrowserWindowView`, or `SmallWindowView` for a small window. It reports becoming main and closing to the session, records the frame that the saved session keeps, and gives the window the title that the Window menu and Mission Control show.
 final class BrowserWindowController: NSWindowController, NSWindowDelegate {
     let model: BrowserWindowModel
+    private let smallPresentationSourcePoint: CGPoint
     private var titleObserver: AnyCancellable?
+    private var previewSourceEventMonitor: Any?
+    private var smallPresentation: NSPanel?
+    private var smallPresentationCompletion: DispatchWorkItem?
+    /// Consumed by the next show; only the URL-creation path has a new page without existing pixels to preserve.
+    var isInitialSmallPresentation = false
     /// Set from the start of the transition into full screen until the window is back, while its frame is not the one to keep.
     private var isInFullScreen = false
     /// Posted with the window when it cannot enter full screen, for which AppKit posts no notification of its own.
@@ -14,16 +21,18 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
 
     /// How far a saved frame must reach onto a screen's visible area, across and down, for the window to open there.
     private static let minimumVisibleLength: CGFloat = 100
+    /// Only the small window's geometry is remembered; its page and tab are never restored.
+    private static let smallWindowFrameKey = "ARCHSmallWindowFrame"
 
-    /// Builds the window hidden at its saved frame. A new small window opens near the top center of the pointer's screen; a main window cascades from `source` or centers at its default size.
+    /// Builds the window hidden at its saved frame. A small window cascades from another small window or centers its remembered size on the pointer; a main window cascades from `source` or centers at its default size.
     init(model: BrowserWindowModel, cascadingFrom source: NSWindow?) {
         self.model = model
+        smallPresentationSourcePoint = NSEvent.mouseLocation
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: model.kind.defaultContentSize),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
         if model.isPrivate {
             window.appearance = NSAppearance(named: .darkAqua)
-            window.backgroundColor = NSColor(SpaceTheme.PrivatePalette.backgroundStart.color)
         }
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
@@ -44,7 +53,22 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
         } else if model.kind == .small {
             // Installing the hosting controller may replace the initial content size.
             window.setContentSize(model.kind.defaultContentSize)
-            window.setFrame(Self.smallWindowFrame(size: window.frame.size, pointer: NSEvent.mouseLocation, screens: NSScreen.screens.map { ($0.frame, $0.visibleFrame) }), display: false)
+            let savedFrame = UserDefaults.standard.string(forKey: Self.smallWindowFrameKey).map(NSRectFromString)
+            let rememberedFrame: CGRect? = savedFrame.flatMap { frame in
+                frame.origin.x.isFinite && frame.origin.y.isFinite && frame.width.isFinite && frame.height.isFinite
+                    && frame.width > 0 && frame.height > 0 ? frame : nil
+            }
+            let cascadeSource = source.flatMap { $0.styleMask.contains(.fullScreen) ? nil : $0 }
+            let preferredSize = rememberedFrame?.size ?? model.kind.defaultContentSize
+            let preferredFrame = cascadeSource?.frame.offsetBy(dx: 30, dy: -30)
+                ?? CGRect(x: smallPresentationSourcePoint.x - preferredSize.width / 2,
+                          y: smallPresentationSourcePoint.y - preferredSize.height / 2,
+                          width: preferredSize.width, height: preferredSize.height)
+            let screenPoint = cascadeSource?.screen.map { CGPoint(x: $0.frame.midX, y: $0.frame.midY) }
+                ?? smallPresentationSourcePoint
+            window.setFrame(Self.smallWindowFrame(size: model.kind.defaultContentSize, pointer: screenPoint,
+                                                 screens: NSScreen.screens.map { ($0.frame, $0.visibleFrame) },
+                                                 preferredFrame: preferredFrame), display: false)
         } else if let source, !source.styleMask.contains(.fullScreen) {
             window.setFrame(source.frame, display: false)
             // The first call places the window on the source and returns the next cascade point, where the second places it within the screen.
@@ -57,6 +81,10 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
         window.delegate = self
         model.nsWindow = window
         model.restorableFrame = window.frame
+        previewSourceEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp, .otherMouseDown, .otherMouseUp, .rightMouseDown, .keyDown]) { [weak self] event in
+            self?.model.recordPreviewSourceEvent(event)
+            return event
+        }
         // The model announces a change before it makes it, so the title is read on the next turn of the run loop.
         titleObserver = Publishers.Merge3(model.objectWillChange, model.session.$spaces.map { _ in }, model.session.$personas.map { _ in })
             .receive(on: DispatchQueue.main)
@@ -69,22 +97,121 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
         return nil
     }
 
-    /// A new small window slides gently down into place. It remains a normal window when focus moves elsewhere.
+    deinit {
+        if let previewSourceEventMonitor { NSEvent.removeMonitor(previewSourceEventMonitor) }
+    }
+
+    /// Grow the small window's presentation from its opening point without resizing the page or changing its saved frame.
     override func showWindow(_ sender: Any?) {
+        let isInitialPresentation = isInitialSmallPresentation
+        isInitialSmallPresentation = false
         guard model.kind == .small, let window, !window.isVisible,
               !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
             super.showWindow(sender)
             return
         }
-        let destination = window.frame
-        window.setFrame(destination.offsetBy(dx: 0, dy: 12), display: false)
         window.alphaValue = 0
         super.showWindow(sender)
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.18
-            window.animator().setFrame(destination, display: true)
-            window.animator().alphaValue = 1
+        // Loading callbacks may not have arrived for a newly created page yet.
+        // Existing pages keep their live pixels, including when a popup is still loading.
+        if isInitialPresentation,
+           let presentationView = window.contentView?.superview ?? window.contentView {
+            presentationView.layoutSubtreeIfNeeded()
+            if let bitmap = presentationView.bitmapImageRepForCachingDisplay(in: presentationView.bounds) {
+                presentationView.cacheDisplay(in: presentationView.bounds, to: bitmap)
+                if let image = bitmap.cgImage {
+                    animateSmallWindow(image: image, in: window)
+                    return
+                }
+            }
         }
+        // Existing pages and presentations that cannot be cached use the supported live crossfade.
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.3
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            window.animator().alphaValue = 1
+        } completionHandler: { [weak window] in
+            window?.alphaValue = 1
+        }
+    }
+
+    private func animateSmallWindow(image: CGImage, in window: NSWindow) {
+        let destination = window.frame
+        let source = smallPresentationSourcePoint
+        let scale = 20 / destination.width
+        let sourceRect = CGRect(x: source.x - 10, y: source.y - destination.height * scale / 2,
+                                width: 20, height: destination.height * scale)
+        // Leave enough transparent surface for the full-bleed shadow's blur and downward offset.
+        let shadowRadius: CGFloat = 22
+        let shadowOffset: CGFloat = 14
+        let shadowExtent = 3 * shadowRadius + shadowOffset
+        let canvas = destination.union(sourceRect).insetBy(dx: -shadowExtent, dy: -shadowExtent)
+        let panel = NSPanel(contentRect: canvas, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.isReleasedWhenClosed = false
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        panel.ignoresMouseEvents = true
+        panel.hidesOnDeactivate = false
+        panel.collectionBehavior = [.transient, .ignoresCycle]
+        let surface = NSView(frame: CGRect(origin: .zero, size: canvas.size))
+        surface.wantsLayer = true
+        panel.contentView = surface
+        let layer = CALayer()
+        layer.bounds = CGRect(origin: .zero, size: destination.size)
+        layer.position = CGPoint(x: destination.midX - canvas.minX, y: destination.midY - canvas.minY)
+        layer.shadowColor = NSColor.black.cgColor
+        layer.shadowOpacity = 0.475
+        layer.shadowRadius = shadowRadius
+        layer.shadowOffset = CGSize(width: 0, height: -shadowOffset)
+        layer.shadowPath = CGPath(roundedRect: layer.bounds, cornerWidth: 10, cornerHeight: 10, transform: nil)
+        let content = CALayer()
+        content.frame = layer.bounds
+        content.contents = image
+        content.contentsScale = window.backingScaleFactor
+        content.cornerRadius = 10
+        content.masksToBounds = true
+        layer.addSublayer(content)
+        surface.layer?.addSublayer(layer)
+        var initial = CATransform3DMakeTranslation(source.x - destination.midX, source.y - destination.midY, 0)
+        initial = CATransform3DScale(initial, scale, scale, 1)
+        let spring = CASpringAnimation(keyPath: "transform")
+        let frequency = 2 * Double.pi / 0.18
+        spring.mass = 1
+        spring.stiffness = frequency * frequency
+        spring.damping = 2 * 0.885 * frequency
+        spring.duration = spring.settlingDuration
+        spring.fromValue = NSValue(caTransform3D: initial)
+        spring.toValue = NSValue(caTransform3D: CATransform3DIdentity)
+        let opacity = CASpringAnimation(keyPath: "opacity")
+        opacity.mass = spring.mass
+        opacity.stiffness = spring.stiffness
+        opacity.damping = spring.damping
+        opacity.duration = spring.duration
+        opacity.fromValue = 0
+        opacity.toValue = 1
+        layer.add(spring, forKey: "ARCHSmallWindowPresentationTransform")
+        layer.add(opacity, forKey: "ARCHSmallWindowPresentationOpacity")
+        smallPresentation = panel
+        window.addChildWindow(panel, ordered: .above)
+        panel.orderFront(nil)
+        let completion = DispatchWorkItem { [weak self, weak panel] in
+            guard let self, let panel, self.smallPresentation === panel else { return }
+            self.finishSmallPresentation()
+        }
+        smallPresentationCompletion = completion
+        DispatchQueue.main.asyncAfter(deadline: .now() + spring.duration, execute: completion)
+    }
+
+    private func finishSmallPresentation(restoringWindow: Bool = true) {
+        smallPresentationCompletion?.cancel()
+        smallPresentationCompletion = nil
+        guard let panel = smallPresentation else { return }
+        smallPresentation = nil
+        if restoringWindow { window?.alphaValue = 1 }
+        window?.removeChildWindow(panel)
+        panel.orderOut(nil)
+        panel.close()
     }
 
     /// The window's content: the main window's sidebar and page, or the small window's row and page.
@@ -111,14 +238,16 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
         return self.frame(of: frame.size, centeredIn: main)
     }
 
-    /// A small window opens near the top center of the pointer's screen, within its visible area.
-    static func smallWindowFrame(size: CGSize, pointer: CGPoint, screens: [(frame: CGRect, visibleFrame: CGRect)]) -> CGRect {
-        guard let screen = screens.first(where: { $0.frame.contains(pointer) }) ?? screens.first else { return CGRect(origin: .zero, size: size) }
-        let area = screen.visibleFrame
-        var result = frame(of: size, centeredIn: area)
-        let topInset = min(48, max(0, (area.height - result.height) / 2))
-        result.origin.y = area.maxY - result.height - topInset
-        return result
+    /// Constrains remembered or cascaded geometry to a screen's visible area with a 20-point margin. With no preferred frame, the initial rectangle has zero origin and the default size.
+    static func smallWindowFrame(size: CGSize, pointer: CGPoint, screens: [(frame: CGRect, visibleFrame: CGRect)], preferredFrame: CGRect? = nil) -> CGRect {
+        let requested = preferredFrame ?? CGRect(origin: .zero, size: size)
+        guard let screen = screens.first(where: { $0.frame.contains(pointer) }) ?? screens.first else { return requested }
+        guard screen.visibleFrame.width > 40, screen.visibleFrame.height > 40 else { return frame(of: requested.size, centeredIn: screen.visibleFrame) }
+        let area = screen.visibleFrame.insetBy(dx: 20, dy: 20)
+        let fitted = CGSize(width: min(requested.width, area.width), height: min(requested.height, area.height))
+        return CGRect(x: min(max(requested.midX - fitted.width / 2, area.minX), area.maxX - fitted.width),
+                      y: min(max(requested.midY - fitted.height / 2, area.minY), area.maxY - fitted.height),
+                      width: fitted.width, height: fitted.height)
     }
 
     /// `size`, at most `area`'s, centered in `area`.
@@ -157,26 +286,40 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        finishSmallPresentation(restoringWindow: false)
+        if model.kind == .small { recordFrame() }
         model.session.windowWillClose(model)
     }
 
     func windowDidMove(_ notification: Notification) {
+        finishSmallPresentation()
         recordFrame()
     }
 
     func windowDidResize(_ notification: Notification) {
+        finishSmallPresentation()
         recordFrame()
+    }
+
+    func windowWillMiniaturize(_ notification: Notification) {
+        finishSmallPresentation()
     }
 
     /// Keeps the window's frame for the saved session, which then saves, except in full screen, where the frame from before stays. Full screen is not restored, so the window opens at that frame next time.
     private func recordFrame() {
-        guard !model.isPrivate, let window, !isInFullScreen, window.frame != model.restorableFrame else { return }
+        guard !model.isPrivate, let window, !isInFullScreen else { return }
+        if model.kind == .small {
+            UserDefaults.standard.set(NSStringFromRect(window.frame), forKey: Self.smallWindowFrameKey)
+        }
+        guard window.frame != model.restorableFrame else { return }
         model.restorableFrame = window.frame
         model.session.scheduleSave()
     }
 
     // Full screen hides the traffic lights, so the toolbar would only cover the sidebar's top row there.
     func windowWillEnterFullScreen(_ notification: Notification) {
+        finishSmallPresentation()
+        if model.kind == .small { recordFrame() }
         isInFullScreen = true
         window?.toolbar?.isVisible = false
     }
@@ -201,7 +344,7 @@ extension BrowserWindowKind {
     var defaultContentSize: NSSize {
         switch self {
         case .main: NSSize(width: 1200, height: 800)
-        case .small: NSSize(width: 800, height: 600)
+        case .small: NSSize(width: 1185, height: 832)
         }
     }
 

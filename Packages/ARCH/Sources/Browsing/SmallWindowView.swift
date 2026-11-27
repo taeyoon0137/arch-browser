@@ -1,5 +1,5 @@
 // A small window opens for a link from another app while Arch is in the background, a page opened by its page or preview, or an extension's `windows.create`.
-// Its top bar holds the page's site, controls, and Persona / Space. Below, the page sits over material tinted by the tab's space.
+// Its top bar holds Persona / Space / page title and the page controls. Below, the page sits over material tinted by the tab's space.
 // The window shows one tab. Find, prompt cards, page fullscreen, docked developer tools, reader, agent panel, and address palette work there. Sidebar commands go to the main window.
 import ARCHEngine
 import SwiftUI
@@ -50,7 +50,7 @@ struct SmallWindowView: View {
     }
 }
 
-/// The small window's controls on the line of the traffic light buttons: the page's icon, the address pill's symbol for the page, and its site, which open the palette to edit the address, then back, forward, reload or stop, share, and Open in Main Window. While an internal page covers the tab, the row names that page, as the address pill does. In full screen, where the traffic lights hide, the row starts at the page's margin.
+/// The small window's controls on the line of the traffic light buttons: Persona / Space / page title, then the page indicators and actions. The title opens the palette to edit the address. While an internal page covers the tab, the row names that page. In full screen, where the traffic lights hide, the row starts at the page's margin.
 private struct SmallWindowTopRow: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
@@ -60,17 +60,11 @@ private struct SmallWindowTopRow: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var isHoveringSite = false
     @State private var pageMenuAnchor = SmallWindowMenuAnchor()
-    @Environment(\.spaceTheme) private var theme
 
     /// The name of the web extension whose page the tab shows (`AddressPillView.extensionName(ofPageAt:in:session:)`), unless an internal page covers it.
     private var extensionName: String? {
         guard windowModel.internalPage == nil, let url = tab.url else { return nil }
         return AddressPillView.extensionName(ofPageAt: url, in: tab, session: session)
-    }
-
-    /// The internal page's address, the name of the extension whose page it is, the page's site, or the page's title without an address.
-    private func siteName(extensionName: String?) -> String {
-        windowModel.internalPage?.address ?? extensionName ?? tab.url.map(AddressPillView.siteName(of:)) ?? tab.pageTitle
     }
 
     var body: some View {
@@ -82,28 +76,33 @@ private struct SmallWindowTopRow: View {
 
     private func row(compact: Bool) -> some View {
         let extensionName = self.extensionName
-        let siteName = self.siteName(extensionName: extensionName)
+        let pageTitle = windowModel.internalPage?.title ?? tab.shownPageTitle
         return HStack(spacing: 4) {
             SmallWindowPlaceMenu(session: session, tab: tab)
-                .frame(minWidth: 96, maxWidth: 220)
                 .layoutPriority(1)
+            Text("/")
+                .font(.system(size: 13))
+                .foregroundStyle(.tertiary)
+                .fixedSize()
+                .accessibilityHidden(true)
             Button { windowModel.focusCommandBar() } label: {
                 HStack(spacing: 6) {
+                    Text(pageTitle)
+                        .font(.system(size: 13, weight: .medium))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(minWidth: 32, maxWidth: .infinity, alignment: .leading)
                     // The icon belongs to the tab, which an internal page hides.
                     if windowModel.internalPage == nil {
                         TabIconView(tab: tab)
                             .frame(width: 16, height: 16)
                     }
-                    // As wide as the globe, the widest of the symbols but the extension's, which takes a point of the spacing on each side, so that the site keeps its place between secure and insecure pages and an extension's, as in the address pill.
+                    // Keep the security indicator's width stable between pages, as in the address pill.
                     Image(systemName: AddressPillView.symbol(for: tab.url, internalPage: windowModel.internalPage, isExtensionPage: extensionName != nil))
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.tertiary)
                         .frame(width: 14)
                         .accessibilityHidden(true)
-                    Text(siteName)
-                        .font(.system(size: 13, weight: .medium))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
                 }
                 .padding(.horizontal, 6)
                 .frame(height: 28)
@@ -114,7 +113,7 @@ private struct SmallWindowTopRow: View {
             .buttonStyle(.plain)
             .onHover { isHoveringSite = $0 }
             .help(windowModel.internalPage?.address ?? tab.url?.absoluteString ?? "")
-            .accessibilityLabel(extensionName.map(AddressPillView.accessibilityLabel(ofExtensionPage:)) ?? siteName)
+            .accessibilityLabel(pageTitle)
             if !compact, !windowModel.isSelectedPageCovered {
                 TemporaryEngineLabel(tab: tab)
             }
@@ -145,12 +144,6 @@ private struct SmallWindowTopRow: View {
         .padding(.leading, (windowButtons.trailingEdge ?? 0) + BrowserWindowView.pageMargin)
         .padding(.trailing, BrowserWindowView.pageMargin)
         .padding(.top, SidebarTopRow.topPadding(below: windowButtons))
-        .overlay(alignment: .bottom) {
-            theme.tint.opacity(0.25)
-                .frame(height: 1)
-                .padding(.horizontal, BrowserWindowView.pageMargin)
-                .allowsHitTesting(false)
-        }
     }
 
     private var pageMenu: some View {
@@ -246,7 +239,6 @@ private struct SmallWindowPlaceMenu: View {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(.tertiary)
-                Spacer(minLength: 0)
             }
             .padding(.horizontal, 6)
             .frame(height: 24)

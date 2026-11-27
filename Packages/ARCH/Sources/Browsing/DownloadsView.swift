@@ -5,11 +5,10 @@ import ARCHEngine
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The Downloads section at the top of the sidebar's library (`LibraryView`): its title with Clear, and a scrolling list of one `DownloadRowView` per download.
+/// The Downloads section uses the shared library header above its scrolling list.
 struct DownloadsSectionView: View {
     @ObservedObject var session: BrowserSession
     @ObservedObject private var summary: DownloadSummary
-    @State private var isClearHovering = false
     /// The list's content in the scroll view's visible area, and the visible area's height, which tell how much is hidden above and below.
     @State private var contentFrame = CGRect.zero
     @State private var listHeight: CGFloat = 0
@@ -21,29 +20,14 @@ struct DownloadsSectionView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            // The section's title and its action share one size and baseline, as the space header's line does.
-            HStack(alignment: .firstTextBaseline) {
-                Text("Downloads", bundle: .module)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button(localized("Clear"), action: session.clearFinishedDownloads)
-                    .buttonStyle(.plain)
-                    .font(.system(size: 13))
-                    // Brightens under the pointer while there is something to clear, as the new space button does.
-                    .foregroundStyle(isClearHovering && summary.hasFinished ? .primary : .secondary)
-                    .onHover { isClearHovering = $0 }
-                    .disabled(!summary.hasFinished)
-            }
-            .padding(.horizontal, 10)
-            .padding(.bottom, 4)
+        VStack(alignment: .leading, spacing: SidebarView.rowSpacing) {
             if session.downloads.isEmpty {
                 Text("No Downloads", bundle: .module)
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.vertical, 16)
+                    .frame(maxHeight: .infinity, alignment: .top)
             } else {
                 ScrollView {
                     VStack(spacing: 2) {
@@ -69,6 +53,8 @@ struct DownloadsSectionView: View {
                         .onChange(of: proxy.size.height) { listHeight = $1 }
                 })
             }
+            LibraryToolRow(symbol: "trash", title: localized("Clear Downloads"), action: session.clearFinishedDownloads)
+                .disabled(!summary.hasFinished)
         }
     }
 }

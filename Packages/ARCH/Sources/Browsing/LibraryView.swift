@@ -1,4 +1,5 @@
 // The bottom-left button opens the library and pushes the sidebar aside. Downloads and history share the top of the panel, with other tools below. The button shows download progress and a badge for unseen finished downloads.
+import AppKit
 import SwiftUI
 
 /// A library column with room for the window buttons. The library button stays in its sidebar position, under the pointer.
@@ -12,7 +13,6 @@ struct LibraryPanel: View {
                 .frame(height: SidebarTopRow.height)
                 .padding(.top, SidebarTopRow.topPadding(below: windowButtons))
             LibraryView(session: session)
-                .padding(.top, 6)
                 .frame(maxHeight: .infinity)
             HStack {
                 LibraryButton(session: session)
@@ -29,25 +29,24 @@ struct LibraryPanel: View {
 struct LibraryView: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Picker(localized("Library"), selection: $windowModel.libraryTab) {
-                Text("Downloads", bundle: .module).tag(LibraryTab.downloads)
-                Text("History", bundle: .module).tag(LibraryTab.history)
-            }
-            .pickerStyle(.segmented)
-            .controlSize(.small)
-            .padding(.horizontal, 6)
-            Group {
+            LibrarySectionHeader()
+            ZStack(alignment: .top) {
                 if windowModel.libraryTab == .downloads {
                     DownloadsSectionView(session: session)
-                } else if windowModel.isLibraryVisible {
-                    LibraryHistoryView(store: session.history, persona: windowModel.personaID)
+                        .transition(.opacity)
+                } else {
+                    // Keep the selected history list alive while its containing panel slides closed.
+                    LibraryHistoryView(model: windowModel.libraryHistoryModel)
                         .id(windowModel.personaID)
+                        .transition(.opacity)
                 }
             }
             .frame(maxHeight: .infinity, alignment: .top)
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.15), value: windowModel.libraryTab)
             Divider().padding(.horizontal, 10)
             VStack(spacing: 2) {
                 LibraryToolRow(symbol: "arrow.uturn.backward", title: localized("Reopen Last Closed Tab"), action: session.reopenLastClosedTab)
@@ -55,6 +54,110 @@ struct LibraryView: View {
                 LibraryToolRow(symbol: "gearshape", title: localized("Settings")) { session.showSettings?() }
             }
         }
+    }
+}
+
+/// The two library tabs fill the panel width; list actions stay below their contents.
+struct LibrarySectionHeader: View {
+    @EnvironmentObject private var windowModel: BrowserWindowModel
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.sidebarIsFloating) private var isFloating
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.layoutDirection) private var layoutDirection
+    @FocusState private var focusedTab: LibraryTab?
+    @State private var usesKeyboardFocus = false
+
+    private var isActiveHost: Bool {
+        windowModel.isLibraryVisible && !windowModel.isPageFullscreen
+            && (isFloating ? !windowModel.isSidebarVisible : windowModel.isSidebarVisible)
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            segment(.downloads, title: localized("Downloads"))
+            segment(.history, title: localized("History"))
+        }
+        .background {
+            GeometryReader { geometry in
+                let width = geometry.size.width / 2
+                let isLeading = windowModel.libraryTab == .downloads
+                let isLeft = isLeading == (layoutDirection == .leftToRight)
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .inset(by: 1)
+                    .fill(SidebarFill.selected.color(in: colorScheme))
+                    .frame(width: width, height: geometry.size.height)
+                    .offset(x: isLeft ? 0 : width)
+                    // The selection moves independently of the contents' crossfade.
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.15), value: windowModel.libraryTab)
+            }
+            .environment(\.layoutDirection, .leftToRight)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+        // Match the address and search field; the selected surface is its one-point inset.
+        .background(RoundedRectangle(cornerRadius: 13, style: .continuous)
+            .fill(SidebarFill.field.color(in: colorScheme)))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(localized("Library"))
+        .disabled(!isActiveHost)
+        .onMoveCommand { direction in
+            guard isActiveHost else { return }
+            switch direction {
+            case .left: select(layoutDirection == .leftToRight ? .downloads : .history)
+            case .right: select(layoutDirection == .leftToRight ? .history : .downloads)
+            default: break
+            }
+        }
+        .onChange(of: isActiveHost) { _, active in
+            if !active {
+                focusedTab = nil
+                usesKeyboardFocus = false
+            }
+        }
+        .onChange(of: focusedTab) { _, tab in
+            if tab != nil, NSApp.currentEvent?.type == .keyDown || NSApp.currentEvent?.type == .keyUp {
+                usesKeyboardFocus = true
+            }
+        }
+        .onChange(of: windowModel.libraryTab) { _, tab in
+            if isActiveHost, usesKeyboardFocus, focusedTab != nil { focusedTab = tab }
+        }
+    }
+
+    private func select(_ tab: LibraryTab) {
+        usesKeyboardFocus = true
+        windowModel.libraryTab = tab
+        focusedTab = tab
+    }
+
+    private func segment(_ tab: LibraryTab, title: String) -> some View {
+        let isSelected = windowModel.libraryTab == tab
+        return Button {
+            switch NSApp.currentEvent?.type {
+            case .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .otherMouseDown, .otherMouseUp:
+                usesKeyboardFocus = false
+                focusedTab = nil
+                windowModel.libraryTab = tab
+            case .keyDown, .keyUp:
+                select(tab)
+            default:
+                windowModel.libraryTab = tab
+            }
+        } label: {
+            Text(title)
+                .font(.system(size: 14))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity)
+                .frame(height: 36)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .contentShape(.focusEffect, RoundedRectangle(cornerRadius: 13, style: .continuous).inset(by: 1))
+        .focusable(interactions: .activate)
+        .focusEffectDisabled(!usesKeyboardFocus)
+        .focused($focusedTab, equals: tab)
+        .foregroundStyle(isSelected ? .primary : .secondary)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 
