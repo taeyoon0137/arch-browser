@@ -50,7 +50,7 @@ struct SmallWindowView: View {
     }
 }
 
-/// The small window's controls on the line of the traffic light buttons: Persona / Space / page title, then the page indicators and actions. The title opens the palette to edit the address. While an internal page covers the tab, the row names that page. In full screen, where the traffic lights hide, the row starts at the page's margin.
+/// The small window's controls on the line of the traffic light buttons: Persona / Space / page icon, security indicator and page title, then the page actions. The title opens the palette to edit the address. While an internal page covers the tab, the row names that page. In full screen, where the traffic lights hide, the row starts at the page's margin.
 private struct SmallWindowTopRow: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
@@ -87,11 +87,6 @@ private struct SmallWindowTopRow: View {
                 .accessibilityHidden(true)
             Button { windowModel.focusCommandBar() } label: {
                 HStack(spacing: 6) {
-                    Text(pageTitle)
-                        .font(.system(size: 13, weight: .medium))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .frame(minWidth: 32, maxWidth: .infinity, alignment: .leading)
                     // The icon belongs to the tab, which an internal page hides.
                     if windowModel.internalPage == nil {
                         TabIconView(tab: tab)
@@ -103,6 +98,11 @@ private struct SmallWindowTopRow: View {
                         .foregroundStyle(.tertiary)
                         .frame(width: 14)
                         .accessibilityHidden(true)
+                    Text(pageTitle)
+                        .font(.system(size: 13, weight: .medium))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(minWidth: 32, maxWidth: .infinity, alignment: .leading)
                 }
                 .padding(.horizontal, 6)
                 .frame(height: 28)
