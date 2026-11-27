@@ -15,6 +15,10 @@ struct PageAreaView: View {
     let margins: EdgeInsets
     /// How far the window has gone into full screen for a page, so that it leaves full screen again with the page.
     @State private var pageFullScreen = PageFullScreen.none
+    /// Relative room beyond each pane's controls, kept while this window changes focus or size.
+    @State private var paneWeights: [UUID: CGFloat] = [:]
+    /// Keep a measured overflow requirement until the bar closes, avoiding resize feedback.
+    @State private var findBarRequiredWidth: CGFloat = 0
 
     /// The window's full screen that a page asked for.
     private enum PageFullScreen {
@@ -87,25 +91,84 @@ struct PageAreaView: View {
                     .overlay { InternalPageOverlay() }
                     .overlay(PageFrameShape().strokeBorder(Color.primary.opacity(0.08)).allowsHitTesting(false))
             } else {
-                HStack(spacing: BrowserWindowView.pageMargin) {
-                    ForEach(panes) { tab in
-                        Group {
-                            if windowModel.shows(tab) {
-                                PagePaneView(session: session, prompts: session.prompts, tab: tab, isSplit: panes.count > 1, isPageFullscreen: isPageFullscreen)
-                            } else {
-                                ShownElsewherePaneView(tab: tab, isSplit: panes.count > 1)
+                GeometryReader { geometry in
+                    let paneIDs = panes.map(\.id)
+                    let room = max(0, geometry.size.width - BrowserWindowView.pageMargin * CGFloat(panes.count - 1))
+                    let minimum = min(PaneCloseButton.clearance * 2, room / CGFloat(panes.count))
+                    // Physical space may limit the reservation; keep the other panes' controls clear first.
+                    let selectedMinimum = windowModel.isFindBarVisible && findBarRequiredWidth > 0 && panes.count > 1
+                        ? min(max(minimum, findBarRequiredWidth + PaneCloseButton.clearance + 16), room - minimum * CGFloat(panes.count - 1))
+                        : minimum
+                    let minimums = paneIDs.map { $0 == windowModel.selectedTabID ? selectedMinimum : minimum }
+                    let flexible = max(0, room - minimums.reduce(0, +))
+                    let knownWeights = paneIDs.compactMap { paneWeights[$0] }.map { max(0, $0) }
+                    let knownTotal = knownWeights.reduce(0, +)
+                    let average = knownTotal / CGFloat(max(1, knownWeights.count))
+                    let weights = knownTotal > 0 ? paneIDs.map { max(0, paneWeights[$0] ?? average) } : Array(repeating: CGFloat(1), count: panes.count)
+                    let total = weights.reduce(0, +)
+                    let proportions = total > 0 ? weights.map { $0 / total } : Array(repeating: 1 / CGFloat(panes.count), count: panes.count)
+                    let widths = zip(minimums, proportions).map { minimum, proportion in minimum + flexible * proportion }
+                    let resize: (Int, CGFloat) -> Void = { index, proposedWidth in
+                        // A drag belongs to the exact pane order in which it began.
+                        guard !windowModel.isPageFullscreen, windowModel.paneTabs.map(\.id) == paneIDs, flexible > 0 else { return }
+                        let pairWidth = widths[index] + widths[index + 1]
+                        let leadingWidth = min(max(proposedWidth, minimums[index]), pairWidth - minimums[index + 1])
+                        var updated = paneWeights
+                        for (id, proportion) in zip(paneIDs, proportions) { updated[id] = proportion }
+                        updated[paneIDs[index]] = (leadingWidth - minimums[index]) / flexible
+                        updated[paneIDs[index + 1]] = (pairWidth - leadingWidth - minimums[index + 1]) / flexible
+                        var transaction = Transaction()
+                        transaction.disablesAnimations = true
+                        withTransaction(transaction) { paneWeights = updated }
+                    }
+
+                    HStack(spacing: 0) {
+                        ForEach(Array(panes.enumerated()), id: \.element.id) { index, tab in
+                            Group {
+                                if windowModel.shows(tab) {
+                                    PagePaneView(session: session, prompts: session.prompts, tab: tab, isSplit: panes.count > 1, isPageFullscreen: isPageFullscreen)
+                                } else {
+                                    ShownElsewherePaneView(tab: tab, isSplit: panes.count > 1)
+                                }
+                            }
+                            .frame(width: widths[index])
+                            // A pane appears and leaves at once, as a page does when another tab is selected.
+                            .transition(.identity)
+                            .background(GeometryReader { proxy in
+                                Color.clear.preference(key: PaneFramesKey.self, value: [PaneFrame(tabID: tab.id, frame: proxy.frame(in: .named(BrowserWindowView.coordinateSpace)))])
+                            })
+
+                            if index < panes.count - 1 {
+                                SidebarResizeHandle(width: widths[index]) { resize(index, $0) }
+                                    .frame(width: BrowserWindowView.pageMargin)
+                                    .frame(maxHeight: .infinity)
+                                    .accessibilityElement(children: .ignore)
+                                    .accessibilityLabel(localized("Resize Split View"))
+                                    .accessibilityValue(Text(Double(widths[index] / max(1, room)), format: .percent.precision(.fractionLength(0))))
+                                    .accessibilityAdjustableAction { direction in
+                                        switch direction {
+                                        case .increment: resize(index, widths[index] + BrowserWindowView.pageMargin * 2)
+                                        case .decrement: resize(index, widths[index] - BrowserWindowView.pageMargin * 2)
+                                        @unknown default: break
+                                        }
+                                    }
+                                    // Replacing the group cancels the old handle's drag origin.
+                                    .id(paneIDs)
                             }
                         }
-                        // A pane appears and leaves at once, as a page does when another tab is selected.
-                        .transition(.identity)
-                        .background(GeometryReader { proxy in
-                            Color.clear.preference(key: PaneFramesKey.self, value: [PaneFrame(tabID: tab.id, frame: proxy.frame(in: .named(BrowserWindowView.coordinateSpace)))])
-                        })
                     }
+                    .frame(width: geometry.size.width, height: geometry.size.height)
                 }
             }
         }
         .onPreferenceChange(PaneFramesKey.self) { sidebarDrag?.paneFrames = $0 }
+        .onPreferenceChange(FindBarRequiredWidthKey.self) { measurement in
+            let width = measurement.requiredWidth
+            if windowModel.isFindBarVisible, width > findBarRequiredWidth { findBarRequiredWidth = width }
+        }
+        .onChange(of: windowModel.isFindBarVisible) { _, isVisible in
+            if !isVisible { findBarRequiredWidth = 0 }
+        }
     }
 }
 

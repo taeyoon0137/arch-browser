@@ -21,7 +21,7 @@ public struct HistoryEntry: Hashable, Identifiable, Sendable {
 
 /// Safe to use from any thread: outside `init` and `deinit`, only blocks on `queue` touch the database. Every visit belongs to one Persona, by its UUID, and every read and removal names the Persona it covers.
 public final class HistoryStore: @unchecked Sendable {
-    /// Posted on the main queue after a write. The object is this store; `userInfo["persona"]` is the affected UUID, or absent when every Persona may have changed.
+    /// Posted on the main queue after a write. The object is this store; `userInfo["persona"]` is the affected UUID, or absent when every Persona may have changed. `userInfo["removal"]` is true when pages were removed.
     public static let didChange = Notification.Name("ARCHHistoryStoreDidChange")
     /// The pages an import writes in one transaction.
     static let importBatchSize = 1_000
@@ -211,7 +211,7 @@ public final class HistoryStore: @unchecked Sendable {
             }
             guard self.execute("COMMIT") != nil else { return self.rollBack() }
             self.removeFromRunningImports(into: persona) { addresses.contains($0.url.absoluteString) }
-            self.notifyChange(in: persona)
+            self.notifyChange(in: persona, removal: true)
         }
     }
 
@@ -234,7 +234,7 @@ public final class HistoryStore: @unchecked Sendable {
                 guard let urls = removed[pending.persona] else { continue }
                 pending.remaining.removeAll { $0.lastVisit >= date || urls.contains($0.url.absoluteString) }
             }
-            self.notifyChange(in: persona)
+            self.notifyChange(in: persona, removal: true)
         }
     }
 
@@ -247,7 +247,7 @@ public final class HistoryStore: @unchecked Sendable {
                                   bindings: [.text(source.uuidString), .text(target.uuidString)]) != nil,
                   self.execute("DELETE FROM visits WHERE persona = ?1", bindings: [.text(source.uuidString)]) != nil,
                   self.execute("COMMIT") != nil else { return self.rollBack() }
-            self.notifyChange(in: source)
+            self.notifyChange(in: source, removal: true)
             self.notifyChange(in: target)
         }
     }
@@ -261,7 +261,7 @@ public final class HistoryStore: @unchecked Sendable {
                 guard self.execute("DELETE FROM visits") != nil else { return }
             }
             self.removeFromRunningImports(into: persona) { _ in true }
-            self.notifyChange(in: persona)
+            self.notifyChange(in: persona, removal: true)
         }
     }
 
@@ -270,9 +270,11 @@ public final class HistoryStore: @unchecked Sendable {
         for pending in runningImports where persona == nil || pending.persona == persona { pending.remaining.removeAll(where: shouldRemove) }
     }
 
-    private func notifyChange(in persona: UUID?) {
+    private func notifyChange(in persona: UUID?, removal: Bool = false) {
         DispatchQueue.main.async {
-            NotificationCenter.default.post(name: Self.didChange, object: self, userInfo: persona.map { ["persona": $0] })
+            var info: [String: Any] = ["removal": removal]
+            if let persona { info["persona"] = persona }
+            NotificationCenter.default.post(name: Self.didChange, object: self, userInfo: info)
         }
     }
 

@@ -1,6 +1,66 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Close Player" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "플레이어 닫기"
+          }
+        }
+      }
+    },
+    "Back to Tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭으로 돌아가기"
+          }
+        }
+      }
+    },
+    "Previous Track" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이전 트랙"
+          }
+        }
+      }
+    },
+    "Next Track" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다음 트랙"
+          }
+        }
+      }
+    },
+    "Mute Tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭 음소거"
+          }
+        }
+      }
+    },
+    "Unmute Tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭 음소거 해제"
+          }
+        }
+      }
+    },
     "Sync Personas, spaces, favorites, pinned tabs and their folders, and some settings. Optionally share open tab addresses and titles with your other Macs. Cookies, website data, history, and sign-in state stay on this Mac." : {
       "localizations" : {
         "ko" : {
@@ -3717,6 +3777,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "마지막으로 닫은 탭 다시 열기"
+          }
+        }
+      }
+    },
+    "Resize Split View" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "분할 보기 크기 조절"
           }
         }
       }

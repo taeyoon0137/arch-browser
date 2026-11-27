@@ -26,6 +26,7 @@ public final class WebKitEngine: Engine {
             WebKitInspectorAPI.register()
             WebKitFileChooserAPI.register()
             WebKitPictureInPictureAPI.register()
+            WebKitAudioMutingAPI.register()
         }
     }
 
@@ -387,7 +388,19 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         if let waitingPage { return waitingPage.state }
         return webView.interactionState as? Data
     }
-    public var isAudible: Bool { !audibleDocuments.isEmpty }
+    public var isAudible: Bool { !audibleDocuments.isEmpty && !isAudioMuted }
+    private var cachedAudioMuted = false
+    public var canSetAudioMuted: Bool { WebKitAudioMutingAPI.isAllowed(in: webView) }
+    public var isAudioMuted: Bool {
+        if let muted = WebKitAudioMutingAPI.isMuted(in: webView) { cachedAudioMuted = muted }
+        return cachedAudioMuted
+    }
+    @discardableResult public func setAudioMuted(_ muted: Bool) -> Bool {
+        guard WebKitAudioMutingAPI.setMuted(muted, in: webView) else { return false }
+        cachedAudioMuted = muted
+        uiDelegate?.webContentsDidChangeAudibleState(self)
+        return true
+    }
     /// WebKit reports the camera and the microphone as active or muted while the page holds them; it has no public state for screen sharing.
     public var isCapturingMedia: Bool { webView.cameraCaptureState != .none || webView.microphoneCaptureState != .none }
     /// WebKit has no public state for picture in picture, so the media script reports each document's (`WebKitAudibleScript`).

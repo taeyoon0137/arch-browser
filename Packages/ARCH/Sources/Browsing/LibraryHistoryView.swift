@@ -60,7 +60,8 @@ struct LibraryHistoryView: View {
                             .padding(.bottom, 4)
                             .accessibilityAddTraits(.isHeader)
                         ForEach(day.entries) { entry in
-                            LibraryHistoryRow(entry: entry, open: { background in open(entry, background: background) },
+                            LibraryHistoryRow(entry: entry, storedIcon: windowModel.session.siteIcons.icon(for: entry.url, in: model.persona),
+                                              open: { background in open(entry, background: background) },
                                               openWindow: { openWindow(entry) }, delete: { model.delete(entry) })
                                 .id(entry.id)
                         }
@@ -152,6 +153,8 @@ struct LibraryHistoryView: View {
 
 private struct LibraryHistoryRow: View {
     let entry: HistoryEntry
+    /// The icon a page of the site showed before (`SiteIconStore`); without one, the row downloads the site's `/favicon.ico`.
+    let storedIcon: NSImage?
     let open: (Bool) -> Void
     let openWindow: () -> Void
     let delete: () -> Void
@@ -207,6 +210,7 @@ private struct LibraryHistoryRow: View {
             Button(localized("Delete from History"), role: .destructive, action: delete)
         }
         .onAppear {
+            if icon == nil { icon = storedIcon }
             if icon == nil, let url = FaviconLoader.defaultIconURL(for: entry.url) {
                 FaviconLoader.load(url) { icon = $0 }
             }

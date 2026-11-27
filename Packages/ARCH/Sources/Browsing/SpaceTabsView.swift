@@ -96,6 +96,7 @@ struct SpaceTabsView: View {
     /// Each tab and folder row's frame in the window, in the pinned area and in the open area with the New Tab row, used to find the row under the pointer and the dropped tab's destination.
     @State private var pinnedFrames: [UUID: CGRect] = [:]
     @State private var openFrames: [UUID: CGRect] = [:]
+    @State private var audioButtonFrames: [UUID: CGRect] = [:]
     /// Empty folders' child rows take tab drops without enlarging the draggable folder headers.
     @State private var pinnedEmptyFolderFrames: [UUID: CGRect] = [:]
     @State private var openEmptyFolderFrames: [UUID: CGRect] = [:]
@@ -500,6 +501,7 @@ struct SpaceTabsView: View {
         }
         .frame(maxHeight: .infinity, alignment: .top)
         .environment(\.isDraggingTab, sidebarDrag.item?.isRow == true)
+        .onPreferenceChange(TabAudioButtonFramesKey.self) { audioButtonFrames = $0 }
         // A cancelled gesture never reports its end. Drop the drag once the gesture is gone and nothing is settling.
         .onChange(of: isDragGestureActive) { _, isActive in
             guard !isActive else { return }
@@ -603,6 +605,8 @@ struct SpaceTabsView: View {
     private func continueDrag(of item: SidebarDragItem, _ value: DragGesture.Value) -> Bool {
         guard windowModel.currentSpaceID == space.id, !sidebarDrag.isSettling, sidebarDrag.item == nil || (sidebarDrag.item == item && sidebarDrag.owner == dragOwner), let frame = rowFrames[item.id] ?? (sidebarDrag.item == item ? sidebarDrag.frame : nil) else { return false }
         if sidebarDrag.item == nil {
+            // An audio control owns the whole pointer sequence, even if the pointer leaves it.
+            if case .tab(let id) = item, audioButtonFrames[id]?.contains(value.startLocation) == true { return false }
             cancelPendingDestinations()
             tabReorder = SidebarReorderHover()
             tabSlot = nil

@@ -65,6 +65,14 @@ public protocol EngineWebContents: AnyObject {
     var restorableState: Data? { get }
     /// Whether a media element in the page plays sound that is not muted. Sound from Web Audio, or from media elements outside the document or inside shadow roots, does not count.
     var isAudible: Bool { get }
+    /// Whether this page supports muting its output without changing media elements or pausing playback.
+    var canSetAudioMuted: Bool { get }
+    /// Whether the app has muted this page's audio output, independently of the page's own media settings.
+    var isAudioMuted: Bool { get }
+    /// Mutes only audio output and preserves each media element's own mute and volume settings. False when unavailable.
+    @discardableResult func setAudioMuted(_ muted: Bool) -> Bool
+    /// Measured frequency levels for this page, or nil when the engine cannot supply them.
+    var audioSpectrum: (any EngineAudioSpectrum)? { get }
     /// Whether the page uses the camera or the microphone, also while the page has muted it. Read when needed; no delegate call reports changes.
     var isCapturingMedia: Bool { get }
     /// Whether a video of the page plays in the system's picture-in-picture window, whose window closes with the page, also while the video is paused or muted. Read when needed; no delegate call reports changes.
@@ -118,6 +126,10 @@ public protocol EngineWebContents: AnyObject {
 }
 
 public extension EngineWebContents {
+    var canSetAudioMuted: Bool { false }
+    var isAudioMuted: Bool { false }
+    @discardableResult func setAudioMuted(_ muted: Bool) -> Bool { false }
+    var audioSpectrum: (any EngineAudioSpectrum)? { nil }
     func download(_ url: URL) {}
     func togglePictureInPicture(completion: @escaping (Bool) -> Void) { completion(false) }
     func setAutomaticPictureInPicture(_ enabled: Bool, sourceWindow: NSWindow?, completion: @escaping (Bool) -> Void) { completion(false) }

@@ -406,7 +406,8 @@ struct FavoritesGridView: View {
 
     private func tile(_ favorite: Favorite, selected: Favorite.ID?, collapsed: Bool) -> some View {
         FavoriteTileView(favorite: favorite, isActive: favorite.id == selected, isOpen: session.hasOpenPage(favorite),
-                         prompts: session.prompts, tabID: session.favoriteTabs[favorite.id]?.id)
+                         prompts: session.prompts, tab: session.favoriteTabs[favorite.id],
+                         storedIcon: session.siteIcons.icon(for: favorite.url, in: personaID))
             // The release that ends a drag does not also open the favorite.
             .onTapGesture { if sidebarDrag.item == nil { windowModel.openFavorite(favorite) } }
             .accessibilityAction { windowModel.openFavorite(favorite) }
@@ -471,8 +472,11 @@ struct FavoriteTileView: View {
     let isOpen: Bool
     /// Observed for the waiting mark, since the session does not republish the queue's changes.
     @ObservedObject var prompts: TabPromptQueue
-    /// The favorite's tab, whose prompts the mark shows.
-    let tabID: UUID?
+    /// The waveform observes the open tab independently of the grid's session updates.
+    let tab: Tab?
+    /// The icon a page of the favorite's site showed before (`SiteIconStore`), used before any download.
+    var storedIcon: NSImage?
+    private var tabID: UUID? { tab?.id }
     @Environment(\.colorScheme) private var colorScheme
     @State private var icon: NSImage?
     /// The icon address last requested, so that an icon arriving after the favorite moved to another site is dropped.
@@ -488,6 +492,18 @@ struct FavoriteTileView: View {
             .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(SidebarFill.hover.color(in: colorScheme).opacity(isHovering && !isActive ? 1 : 0)))
             .frame(maxWidth: .infinity)
             .frame(height: FavoriteTileLayout.height)
+            .overlay {
+                if let tab {
+                    TabPlaybackWaveform(tab: tab)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+            }
+            // Without a measured spectrum, notes rise from behind the icon instead, kept inside the tile.
+            .overlay {
+                if let tab {
+                    TabPlaybackNotes(tab: tab, cornerRadius: 10)
+                }
+            }
             .overlay {
                 if let icon {
                     Image(nsImage: icon)
@@ -531,6 +547,10 @@ struct FavoriteTileView: View {
         guard icon == nil else { return }
         let url = favorite.url
         iconURL = url
+        if let storedIcon {
+            icon = storedIcon
+            return
+        }
         FaviconLoader.loadPageIcon(for: url) { image in
             if iconURL == url { icon = image }
         }

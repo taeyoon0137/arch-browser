@@ -63,6 +63,17 @@ import Foundation
     @Published public private(set) var favicon: NSImage?
     /// Whether the page plays sound, for a speaker badge on its row.
     @Published public private(set) var isAudible = false
+    /// Output muting belongs to this tab's engine page, without changing site media settings.
+    @Published public private(set) var isAudioMuted = false
+    public var canSetAudioMuted: Bool { webContents.canSetAudioMuted }
+
+    public func setAudioMuted(_ muted: Bool) {
+        guard webContents.setAudioMuted(muted) else { return }
+        isAudioMuted = webContents.isAudioMuted
+        isAudible = webContents.isAudible
+    }
+
+    public func toggleAudioMuted() { setAudioMuted(!isAudioMuted) }
     /// Whether the user typed into the page since its main frame's document loaded, as `TabUnloading.inputScript` reports, which keeps the tab loaded (bookmark rule 5). A main document's commit clears it, and another web contents starts without.
     private(set) var hasTypedInput = false
     /// Set by the session while an automatic unload asks the page to leave, until the page answers, the user asks it to leave, or another web contents takes its place: a Chromium page's leave-page question then gets Stay without a card, which keeps the page (bookmark rule 5).
@@ -148,6 +159,8 @@ import Foundation
     var agentOwnerOfFolder: ((UUID) -> UUID?)?
     /// Where an agent tab asks about its navigations and reports what its rules did. The session sets it.
     weak var agentMonitor: (any AgentTabMonitor)?
+    /// Called after the page reports a new icon, which the session stores for its site (`SiteIconStore`).
+    var didChangeFavicon: (() -> Void)?
 
     /// Wraps engine contents and observes its UI, navigation, and page script events.
     init(id: UUID, webContents: any EngineWebContents, spaceID: UUID?, isPinned: Bool, personaID: UUID) {
@@ -163,6 +176,8 @@ import Foundation
         self.canGoBack = webContents.canGoBack
         self.canGoForward = webContents.canGoForward
         self.favicon = webContents.favicon
+        self.isAudible = webContents.isAudible
+        self.isAudioMuted = webContents.isAudioMuted
         webContents.uiDelegate = self
         webContents.navigationDelegate = self
         webContents.pageScriptDelegate = self
@@ -347,8 +362,14 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         if !webContents.isLoading { commit(url) }
         if isPinned, savedPage == nil, let url { savedPage = SavedPage(url: url, title: "") }
     }
-    public func webContentsDidChangeFavicon(_ webContents: any EngineWebContents) { favicon = webContents.favicon }
-    public func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents) { isAudible = webContents.isAudible }
+    public func webContentsDidChangeFavicon(_ webContents: any EngineWebContents) {
+        favicon = webContents.favicon
+        didChangeFavicon?()
+    }
+    public func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents) {
+        isAudible = webContents.isAudible
+        isAudioMuted = webContents.isAudioMuted
+    }
     public func webContentsDidClose(_ webContents: any EngineWebContents) { didClose?() }
     /// A page's request to be shown, such as an opener's `focus()` on its popup. An agent's tab never takes focus or switches the window's space, so it asks for nothing; picture in picture's way back to the tab, which comes the same way, then does nothing either, and the user reaches the tab through its folder.
     public func webContentsDidRequestActivation(_ webContents: any EngineWebContents) {
@@ -450,6 +471,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         webContents.navigationDelegate = nil
         webContents.pageScriptDelegate = nil
         documentID = UUID()
+        if isAudioMuted, replacement.canSetAudioMuted { replacement.setAudioMuted(true) }
         webContents = replacement
         replacement.uiDelegate = self
         replacement.navigationDelegate = self
@@ -459,6 +481,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         canGoBack = replacement.canGoBack
         canGoForward = replacement.canGoForward
         isAudible = replacement.isAudible
+        isAudioMuted = replacement.isAudioMuted
         hasTypedInput = false
         answersBeforeUnloadWithStay = false
         hasCrashed = false

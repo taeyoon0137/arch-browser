@@ -53,6 +53,8 @@ final class EngineRuntime {
     /// The keyword shortcuts that the palette searches and Settings ▸ Site Search and imports change.
     public let siteSearch: SiteSearchStore
     public let siteRules: SiteRuleStore
+    /// The icons that each Persona's pages showed, which tabs without their page, favorites, and history rows show.
+    public let siteIcons: SiteIconStore
     /// Whether macOS lets Arch show notifications, which the download notifier, the permission card, and Settings ▸ Websites share.
     public let notificationAuthorization = NotificationAuthorization()
     /// Each running engine's application, started once.
@@ -176,6 +178,7 @@ final class EngineRuntime {
         sitePermissions = SitePermissionStore(directory: userDataDirectory)
         siteSearch = SiteSearchStore(directory: userDataDirectory)
         siteRules = SiteRuleStore(directory: userDataDirectory)
+        siteIcons = SiteIconStore(directory: userDataDirectory)
         permissionAnswers = SitePermissionAnswers(store: sitePermissions, notifications: notificationAuthorization, agentOnlyPersonaID: Self.agentOnly(agentOnlyPersonaID))
         downloadNotifier = DownloadNotifier(authorization: notificationAuthorization)
         // Without a saved session, or with a file that did not load, the session starts from an empty snapshot. Normalizing gives every Persona a space, so there is always a current space.
@@ -203,11 +206,13 @@ final class EngineRuntime {
         }
         // An engine cannot remove the storage of a profile it has loaded, so the removal comes before any engine starts.
         let permissions = sitePermissions
+        let icons = siteIcons
         personaDataRemoval = PersonaDataRemoval(ids: snapshot.removedPersonaIDs ?? [], registry: registry,
                                                 configuration: Self.engineConfiguration(userDataDirectory: userDataDirectory)) {
             let pluginDataRemoved = PluginManager.removeData(ofPersona: $0, in: userDataDirectory)
             let cookieRecordRemoved = CookieSync.removeRecord(ofPersona: $0, in: userDataDirectory)
             let permissionsRemoved = permissions.removeAnswers(ofPersona: $0)
+            icons.removeAll(ofPersona: $0)
             // The store removes the visits on its queue and logs a failure; the Persona's pages show nowhere once it is gone.
             history.clear(persona: $0)
             return pluginDataRemoved && cookieRecordRemoved && permissionsRemoved
@@ -1298,6 +1303,11 @@ final class EngineRuntime {
     func makeTab(_ webContents: any EngineWebContents, id: UUID, spaceID: UUID?, personaID: UUID, pinned: Bool) -> Tab {
         let tab = Tab(id: id, webContents: webContents, spaceID: spaceID, isPinned: pinned, personaID: personaID)
         if privateRuntimes[personaID] != nil { tab.privateSessionID = personaID }
+        // A private window's pages leave no record, so their icons are not stored.
+        tab.didChangeFavicon = { [weak self, weak tab] in
+            guard let self, let tab, !tab.isPrivate, let icon = tab.favicon, let url = tab.url else { return }
+            self.siteIcons.remember(icon, for: url, in: tab.personaID)
+        }
         // A tab a page opens comes from the page's runtime, so it belongs to the page's Persona, and it keeps the page as its opener. The window that shows the page shows the new tab, in the page's space, which is that window's current space, or in another small window beside a small window. A page that no window shows opens it behind, marked unread, in the page's space or, for a favorite's page, its Persona's preferred space. A page of a tab that a script plugin opened, before the user acted in it, opens its tab held as theirs (`PageDownloadGate.holdUntilUserActs()`), so that their own pages cannot download through the tabs they open.
         tab.routeNewTabLink = { [weak self, weak tab] action in
             guard let self, let tab, self.allTabs.contains(where: { $0 === tab }) else { return .cancel }
@@ -1724,7 +1734,7 @@ final class EngineRuntime {
         downloadOnlyTabIDs.remove(tab.id)
         moveSelections(awayFrom: tab, reason: reason)
         retire(tab.unloadToSavedPage(), of: tab.personaID)
-        (tab.webContents as? UnloadedWebContents)?.loadSiteIcon()
+        (tab.webContents as? UnloadedWebContents).map { $0.loadSiteIcon(stored: $0.url.flatMap { siteIcons.icon(for: $0, in: tab.personaID) }) }
         loadPageIfShown(tab)
         return true
     }
@@ -2174,7 +2184,7 @@ final class EngineRuntime {
     // MARK: Now Playing
 
     /// Shows the media of the focused or most recently audible tab in Now Playing and sends the media keys to it.
-    private var nowPlaying: NowPlaying?
+    private(set) var nowPlaying: NowPlaying?
 
     // MARK: Page reader and questions
 
@@ -2683,7 +2693,7 @@ final class EngineRuntime {
             } else {
                 page = UnloadedWebContents(record: record, defaultEngine: defaultEngine)
             }
-            page.loadSiteIcon()
+            page.loadSiteIcon(stored: record.url.flatMap { siteIcons.icon(for: $0, in: personaID) })
             let tab = adopt(page, id: record.id ?? UUID(), spaceID: record.spaceID, personaID: personaID, pinned: record.isPinned, select: false)
             tab.restore(record, folderID: existingFolderID(record.folderID, spaceID: record.spaceID, pinned: record.isPinned))
             restored[index] = tab
@@ -2715,6 +2725,23 @@ final class EngineRuntime {
             .dropFirst()
             .sink { [weak self] in self?.scheduleSave() }
             .store(in: &cancellables)
+        NotificationCenter.default.publisher(for: HistoryStore.didChange, object: history)
+            .filter { $0.userInfo?["removal"] as? Bool == true }
+            .sink { [weak self] in self?.pruneSiteIcons(of: $0.userInfo?["persona"] as? UUID) }
+            .store(in: &cancellables)
+    }
+
+    /// After history loses pages, each affected Persona, or every one for nil, keeps only the icons of hosts that its remaining history, tabs, pinned tabs' saved pages, and favorites still name.
+    private func pruneSiteIcons(of persona: UUID?) {
+        for id in persona.map({ [$0] }) ?? personas.map(\.id) {
+            history.entries(since: .distantPast, in: id) { [weak self] entries in
+                guard let self else { return }
+                var urls = entries.map(\.url)
+                for tab in self.allTabs where tab.personaID == id { urls += [tab.url, tab.savedPage?.url].compactMap { $0 } }
+                urls += self.favorites.filter { $0.resolvedPersonaID == id }.map(\.url)
+                self.siteIcons.prune(persona: id, keeping: Set(urls.compactMap(SiteIconStore.host)))
+            }
+        }
     }
 
     /// Saves the session once changes stop for half a second. The window controllers call it for frame changes, which no published value reports.

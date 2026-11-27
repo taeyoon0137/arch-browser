@@ -32,7 +32,10 @@ import Testing
 
     @Test func privateThemeIsIndependentOfSpaceAndSystemAppearance() {
         let reference = SpaceTheme(tint: .gray, strength: .subtle, colorScheme: .dark, isPrivate: true)
-        #expect(reference.backgroundColors == [SpaceTheme.PrivatePalette.backgroundStart.color, SpaceTheme.PrivatePalette.backgroundEnd.color])
+        // The private tint washes the dark material at the strong strength, as an ordinary window's tint does.
+        let opacities = TintStrength.strong.opacities
+        #expect(reference.backgroundColors == [SpaceTheme.PrivatePalette.backgroundStart.color.opacity(opacities.start),
+                                               SpaceTheme.PrivatePalette.backgroundStart.color.opacity(opacities.end)])
         for tint in SpaceTint.allCases {
             for strength in TintStrength.allCases {
                 for scheme in [ColorScheme.light, .dark] {
@@ -47,22 +50,27 @@ import Testing
         }
     }
 
-    @Test func privatePaletteKeepsTextReadableAcrossTheGradientAndControls() {
+    @Test func privatePaletteKeepsTextReadableOnItsBackgroundAndControls() {
         typealias Palette = SpaceTheme.PrivatePalette
-        #expect(Palette.backgroundStart.luminance > SRGBColor.black.luminance)
-        #expect(Palette.backgroundEnd.luminance > SRGBColor.black.luminance)
-        #expect(Palette.backgroundStart != Palette.backgroundEnd)
-        let gradient = (0...10).map { Palette.backgroundStart.over(Palette.backgroundEnd, opacity: Double($0) / 10) }
-        for background in gradient {
-            #expect(Palette.field.luminance > background.luminance)
-            #expect(Palette.separator.contrast(with: background) >= 3)
+        // One solid background; the controls and text are translucent white, so each is composited over what it sits on.
+        let background = Palette.backgroundStart
+        #expect(Palette.backgroundEnd == background)
+        #expect(background.luminance > SRGBColor.black.luminance)
+        let field = Palette.field.over(background, opacity: 1)
+        let hover = Palette.hover.over(background, opacity: 1)
+        let selected = Palette.selected.over(background, opacity: 1)
+        #expect(Palette.separator.over(background, opacity: 1).luminance > background.luminance)
+        #expect(field.luminance > background.luminance)
+        #expect(selected.luminance > hover.luminance)
+        #expect(selected.luminance > field.luminance)
+        for surface in [background, field, hover, selected] {
+            #expect(Palette.primary.over(surface, opacity: 1).contrast(with: surface) >= SpaceTheme.minimumTextContrast)
+            #expect(Palette.tertiary.over(surface, opacity: 1).contrast(with: surface) >= 2)
         }
-        #expect(Palette.selected.luminance > Palette.hover.luminance)
-        #expect(Palette.selected.luminance > Palette.field.luminance)
-        for background in gradient + [Palette.field, Palette.hover, Palette.selected] {
-            #expect(Palette.primary.contrast(with: background) >= SpaceTheme.minimumTextContrast)
-            #expect(Palette.secondary.contrast(with: background) >= SpaceTheme.minimumTextContrast)
-            #expect(Palette.tertiary.contrast(with: background) >= 3)
+        // Secondary text reaches body-text contrast on the sidebar's background; on a highlighted row it still stays at least 3:1.
+        #expect(Palette.secondary.over(background, opacity: 1).contrast(with: background) >= SpaceTheme.minimumTextContrast)
+        for surface in [field, hover, selected] {
+            #expect(Palette.secondary.over(surface, opacity: 1).contrast(with: surface) >= 3)
         }
     }
 

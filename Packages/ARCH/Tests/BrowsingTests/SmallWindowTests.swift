@@ -72,13 +72,20 @@ import Testing
         let registry = EngineRegistry()
         registry.register(SessionTestEngine())
         let session = try BrowserSession(testRegistry: registry, directory: directory)
+        // Without a remembered small-window size, the window uses the default size.
+        UserDefaults.standard.removeObject(forKey: "ARCHSmallWindowFrame")
         let small = session.makeWindow(from: .init(id: UUID(), frame: nil, currentSpaceID: session.spaces[0].id, selectedTabID: nil, isSidebarVisible: false), kind: .small)
         defer { session.windowWillClose(small) }
         let window = try #require(small.nsWindow)
-        let contentSize = BrowserWindowKind.small.defaultContentSize
-        let expectedSize = window.frameRect(forContentRect: CGRect(origin: .zero, size: contentSize)).size
-        let expected = BrowserWindowController.smallWindowFrame(size: expectedSize, pointer: NSEvent.mouseLocation, screens: NSScreen.screens.map { ($0.frame, $0.visibleFrame) })
+        let screens = NSScreen.screens.map { ($0.frame, $0.visibleFrame) }
+        // Centered on the pointer, which may move during the test, so the size and the fit are checked rather than the origin.
+        let expected = BrowserWindowController.smallWindowFrame(size: BrowserWindowKind.small.defaultContentSize, pointer: CGPoint(x: window.frame.midX, y: window.frame.midY),
+                                                                screens: screens, preferredFrame: window.frame)
         #expect(window.frame == expected)
+        if screens.contains(where: { $0.1.width >= 1225 && $0.1.height >= 872 }) {
+            #expect(window.frame.size == BrowserWindowKind.small.defaultContentSize)
+        }
+        #expect(screens.contains { $0.1.insetBy(dx: 20, dy: 20).contains(window.frame) })
         #expect(window.contentMinSize == BrowserWindowKind.small.minimumContentSize)
         #expect(window.frame.width >= BrowserWindowKind.small.minimumContentSize.width)
         #expect(window.frame.height >= BrowserWindowKind.small.minimumContentSize.height)
@@ -140,24 +147,34 @@ import Testing
     private let externalScreen = (frame: CGRect(x: 1440, y: 0, width: 1920, height: 1080), visibleFrame: CGRect(x: 1440, y: 0, width: 1920, height: 1055))
     private let size = CGSize(width: 800, height: 600)
 
+    /// The window's frame centered on the pointer, as a new small window asks for it.
+    private func centered(on pointer: CGPoint) -> CGRect {
+        CGRect(x: pointer.x - size.width / 2, y: pointer.y - size.height / 2, width: size.width, height: size.height)
+    }
+
     @Test func theWindowOpensOnTheScreenWithThePointer() {
-        let frame = BrowserWindowController.smallWindowFrame(size: size, pointer: CGPoint(x: 2000, y: 500), screens: [mainScreen, externalScreen])
-        #expect(frame == CGRect(x: 2000, y: 407, width: 800, height: 600))
+        let pointer = CGPoint(x: 2000, y: 500)
+        let frame = BrowserWindowController.smallWindowFrame(size: size, pointer: pointer, screens: [mainScreen, externalScreen], preferredFrame: centered(on: pointer))
+        #expect(frame == CGRect(x: 1600, y: 200, width: 800, height: 600))
     }
 
     @Test func aPointerInTheMenuBarStillPicksItsScreen() {
-        let frame = BrowserWindowController.smallWindowFrame(size: size, pointer: CGPoint(x: 2000, y: 1070), screens: [mainScreen, externalScreen])
-        #expect(frame == CGRect(x: 2000, y: 407, width: 800, height: 600))
+        let pointer = CGPoint(x: 2000, y: 1070)
+        let frame = BrowserWindowController.smallWindowFrame(size: size, pointer: pointer, screens: [mainScreen, externalScreen], preferredFrame: centered(on: pointer))
+        // The window stays 20 points below the top of the visible area.
+        #expect(frame == CGRect(x: 1600, y: 435, width: 800, height: 600))
     }
 
     @Test func aPointerOnNoScreenPicksTheMainScreen() {
-        let frame = BrowserWindowController.smallWindowFrame(size: size, pointer: CGPoint(x: -500, y: 500), screens: [mainScreen, externalScreen])
-        #expect(frame == CGRect(x: 320, y: 227, width: 800, height: 600))
+        let pointer = CGPoint(x: -500, y: 500)
+        let frame = BrowserWindowController.smallWindowFrame(size: size, pointer: pointer, screens: [mainScreen, externalScreen], preferredFrame: centered(on: pointer))
+        #expect(frame == CGRect(x: 20, y: 200, width: 800, height: 600))
     }
 
     @Test func theWindowShrinksToASmallScreen() {
         let small = (frame: CGRect(x: 0, y: 0, width: 800, height: 600), visibleFrame: CGRect(x: 0, y: 0, width: 800, height: 575))
-        let frame = BrowserWindowController.smallWindowFrame(size: size, pointer: CGPoint(x: 100, y: 100), screens: [small])
-        #expect(frame == CGRect(x: 0, y: 0, width: 800, height: 575))
+        let pointer = CGPoint(x: 100, y: 100)
+        let frame = BrowserWindowController.smallWindowFrame(size: size, pointer: pointer, screens: [small], preferredFrame: centered(on: pointer))
+        #expect(frame == CGRect(x: 20, y: 20, width: 760, height: 535))
     }
 }

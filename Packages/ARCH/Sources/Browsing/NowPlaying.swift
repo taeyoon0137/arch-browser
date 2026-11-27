@@ -5,7 +5,27 @@ import Combine
 import MediaPlayer
 
 /// Feeds `MPNowPlayingInfoCenter` from the media session of the focused tab, the active window's selected tab, while it plays sound, and otherwise of the tab that played sound last, and sends `MPRemoteCommandCenter` commands to that session. The page's Media Session metadata names the media; without it, the page's title and site stand in.
-@MainActor final class NowPlaying: @preconcurrency EngineMediaSessionDelegate {
+@MainActor final class NowPlaying: ObservableObject, @preconcurrency EngineMediaSessionDelegate {
+    /// A live tab's media, excluding private sessions and playback position, without retaining its page.
+    struct Item: Identifiable, Equatable {
+        let id: UUID
+        let personaID: UUID
+        let title: String
+        let artist: String?
+        let artworkURL: URL?
+        let isPlaying: Bool
+        let canGoToNextTrack: Bool
+        let canGoToPreviousTrack: Bool
+    }
+
+    /// Tabs outside private sessions, in session order. Each window limits these items to its own Persona.
+    @Published private(set) var items: [Item] = []
+    private struct DismissedPlayback {
+        let contentsID: ObjectIdentifier
+        var hasPaused: Bool
+    }
+    /// Closing a sidebar player leaves its tab, playback, and system media controls alone.
+    private var dismissedPlayback: [UUID: DismissedPlayback] = [:]
     private weak var session: BrowserSession?
     private var cancellables: Set<AnyCancellable> = []
     private var tabObservers: [UUID: AnyCancellable] = [:]
@@ -33,17 +53,21 @@ import MediaPlayer
         let ids = Set(tabs.map(\.id))
         tabObservers = tabObservers.filter { ids.contains($0.key) }
         audibleChangedAt = audibleChangedAt.filter { ids.contains($0.key) }
+        dismissedPlayback = dismissedPlayback.filter { ids.contains($0.key) }
         for tab in tabs where tabObservers[tab.id] == nil {
             // A tab that switches engines gets another web contents with its own media session.
-            let media = tab.$webContents.sink { [weak self] webContents in webContents.mediaSession.delegate = self }
+            let media = tab.$webContents.sink { [weak self] webContents in
+                webContents.mediaSession.delegate = self
+                self?.scheduleUpdate()
+            }
             let audible = tab.$isAudible.removeDuplicates().sink { [weak self, weak tab] isAudible in
                 guard let self, let tab, isAudible || self.audibleChangedAt[tab.id] != nil else { return }
                 self.audibleChangedAt[tab.id] = Date()
                 self.scheduleUpdate()
             }
             // The page's title and site stand in for missing metadata.
-            let page = Publishers.Merge(tab.$title.map { _ in }, tab.$url.map { _ in }).sink { [weak self, weak tab] in
-                if let self, let tab, tab === self.shownTab { self.scheduleUpdate() }
+            let page = Publishers.Merge(tab.$title.map { _ in }, tab.$url.map { _ in }).sink { [weak self] in
+                self?.scheduleUpdate()
             }
             tabObservers[tab.id] = AnyCancellable {
                 media.cancel()
@@ -55,6 +79,28 @@ import MediaPlayer
     }
 
     func mediaSessionDidChange(_ session: any EngineMediaSession) { scheduleUpdate() }
+
+    func dismiss(_ tab: Tab) {
+        guard !tab.isPrivate, session?.allTabs.contains(where: { $0 === tab }) == true else { return }
+        dismissedPlayback[tab.id] = DismissedPlayback(contentsID: ObjectIdentifier(tab.webContents),
+                                                     hasPaused: tab.webContents.mediaSession.playbackState != .playing)
+        items.removeAll { $0.id == tab.id }
+    }
+
+    /// A new page or playback episode may offer its controls again; position and metadata updates cannot undo a dismissal.
+    private func isDismissed(_ tab: Tab) -> Bool {
+        guard var dismissed = dismissedPlayback[tab.id] else { return false }
+        let state = tab.webContents.mediaSession.playbackState
+        if dismissed.contentsID != ObjectIdentifier(tab.webContents) || state == .none || (dismissed.hasPaused && state == .playing) {
+            dismissedPlayback.removeValue(forKey: tab.id)
+            return false
+        }
+        if state == .paused && !dismissed.hasPaused {
+            dismissed.hasPaused = true
+            dismissedPlayback[tab.id] = dismissed
+        }
+        return true
+    }
 
     /// Combines the changes of one run loop turn into one update. Published values also arrive before they are stored.
     private func scheduleUpdate() {
@@ -75,6 +121,19 @@ import MediaPlayer
     }
 
     private func update() {
+        let newItems = session?.allTabs.compactMap { tab -> Item? in
+            guard !tab.isPrivate, !isDismissed(tab), audibleChangedAt[tab.id] != nil else { return nil }
+            let media = tab.webContents.mediaSession
+            guard media.playbackState != .none else { return nil }
+            let metadata = media.metadata
+            let title = metadata.map(\.title).flatMap { $0.isEmpty ? nil : $0 } ?? tab.shownPageTitle
+            let artist = metadata.map(\.artist).flatMap { $0.isEmpty ? nil : $0 }
+                ?? tab.url.flatMap { url in url.host == nil ? nil : tab.extensionName?(url) ?? AddressPillView.siteName(of: url) }
+            return Item(id: tab.id, personaID: tab.personaID, title: title, artist: artist, artworkURL: metadata?.artwork,
+                        isPlaying: media.playbackState == .playing,
+                        canGoToNextTrack: media.canGoToNextTrack, canGoToPreviousTrack: media.canGoToPreviousTrack)
+        } ?? []
+        if items != newItems { items = newItems }
         let tab = tabToShow()
         shownTab = tab
         let center = MPNowPlayingInfoCenter.default()

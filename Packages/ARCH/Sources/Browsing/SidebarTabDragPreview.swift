@@ -56,6 +56,12 @@ struct SidebarTabDragPreview: View, Animatable {
             .overlay(shape.fill(SidebarFill.field.color(in: colorScheme)).opacity(fraction))
             .overlay(shape.fill(SidebarFill.selected.color(in: colorScheme)).opacity(isSelected ? fraction : 0))
             .shadow(color: .black.opacity(isSelected && colorScheme == .light ? 0.08 : 0), radius: 1.5, y: 0.5)
+            .overlay {
+                if let tab {
+                    TabPlaybackWaveform(tab: tab, isEnabled: favorite != nil || isSelected)
+                        .clipShape(shape)
+                }
+            }
             .overlay(alignment: .leading) {
                 rowDetails
                     .frame(width: max(0, size.width - 42), height: size.height, alignment: .leading)
@@ -139,12 +145,12 @@ private struct SidebarTabDragDetails: View {
         let isShownElsewhere = windowModel.isShownInAnotherWindow(tab)
         let isDimmed = (!tab.isLoaded && tab.id != windowModel.selectedTabID) || isShownElsewhere
         HStack(spacing: 8) {
+            if tab.isAudible || tab.isAudioMuted { TabAudioBadge(isMuted: tab.isAudioMuted) }
             Text(tab.shownTitle)
                 .font(.system(size: 14))
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .opacity(isDimmed ? SidebarDimming.unopened : 1)
-            if tab.isAudible { TabAudioBadge() }
             if isShownElsewhere { TabShownElsewhereBadge() }
             TabPromptIndicator(prompts: session.prompts, tabID: tab.id)
             Spacer(minLength: 0)

@@ -257,7 +257,8 @@ struct CommandPaletteView: View {
             PaletteTabRow(tab: tab, isSelected: isSelected)
         case .history(let entry):
             // The site follows the title in the rows' trailing column, as a command's plugin does.
-            PaletteRow(symbol: "clock", title: entry.title.isEmpty ? entry.url.absoluteString : entry.title,
+            PaletteRow(symbol: "clock", icon: session.siteIcons.icon(for: entry.url, in: windowModel.personaID),
+                       title: entry.title.isEmpty ? entry.url.absoluteString : entry.title,
                        detail: entry.title.isEmpty ? nil : AddressPillView.siteName(of: entry.url), isSelected: isSelected)
         }
     }
@@ -644,6 +645,8 @@ extension Animation {
 /// One row of the command palette: a symbol, a title, an optional second line, and dim trailing text.
 struct PaletteRow: View {
     let symbol: String
+    /// A site's icon, drawn as a tab row draws one, in place of `symbol`.
+    var icon: NSImage?
     let title: String
     /// A second line when the action needs a sharing disclosure.
     var subtitle: String?
@@ -655,11 +658,22 @@ struct PaletteRow: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            Image(systemName: symbol)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(.secondary)
-                .frame(width: 20)
-                .accessibilityHidden(true)
+            Group {
+                if let icon {
+                    // Square, as every other list draws a site's icon, and centered in the rows' symbol column.
+                    Image(nsImage: icon)
+                        .resizable()
+                        .interpolation(.high)
+                        .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+                        .frame(width: 18, height: 18)
+                } else {
+                    Image(systemName: symbol)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 20)
+            .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
                     .font(.system(size: 15, weight: isPrimary ? .medium : .regular))

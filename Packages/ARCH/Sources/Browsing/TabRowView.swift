@@ -2,6 +2,7 @@
 // Hover actions close, unload a pinned tab, or return a pinned tab to its saved page. The inline field renames a tab or folder.
 import AI
 import AppKit
+import ARCHPrivateAPI
 import SwiftUI
 
 /// One tab's row in a space's list in the sidebar; `SpaceTabsView` places it.
@@ -11,10 +12,12 @@ struct TabRowView: View {
     @EnvironmentObject private var windowModel: BrowserWindowModel
     @ObservedObject var tab: Tab
     @ObservedObject private var commandKey = CommandKeyState.shared
+    @ObservedObject private var privateAPIFlags = PrivateAPIFlags.shared
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.spaceTheme) private var theme
     @Environment(\.isDraggingTab) private var isDraggingTab
     @State private var isHovering = false
+    @State private var audioButtonFrame = CGRect.zero
 
     private var isSelected: Bool { tab.id == windowModel.selectedTabID }
     /// A tab without its page, as one restored from the last session or unloaded since (bookmark rules 4 and 5), gets it again only when a window shows it, and its icon and title are dimmed until then, so the sidebar shows which tabs have pages.
@@ -36,6 +39,18 @@ struct TabRowView: View {
             TabIconView(tab: tab)
                 .frame(width: 18, height: 18)
                 .opacity(isDimmed ? SidebarDimming.unopened : 1)
+            if tab.isAudible || tab.isAudioMuted {
+                TabRowButton(symbol: tab.isAudioMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
+                             label: tab.isAudioMuted ? localized("Unmute Tab") : localized("Mute Tab"),
+                             help: tab.isAudioMuted ? localized("Unmute Tab") : localized("Mute Tab")) {
+                    tab.setAudioMuted(!tab.isAudioMuted)
+                }
+                .disabled(!tab.canSetAudioMuted)
+                .background(GeometryReader { proxy in
+                    Color.clear.preference(key: TabAudioButtonFramesKey.self,
+                                           value: [tab.id: proxy.frame(in: .named(BrowserWindowView.coordinateSpace))])
+                })
+            }
             if windowModel.renamingTabID == tab.id {
                 SidebarNameField(placeholder: localized("Tab Name"), name: tab.shownTitle,
                                  onRename: { windowModel.renameTab(tab.id, to: $0) }, onEnd: { windowModel.endRenaming(tab.id) })
@@ -46,13 +61,10 @@ struct TabRowView: View {
                     .truncationMode(.tail)
                     .opacity(isDimmed ? SidebarDimming.unopened : 1)
             }
-            if tab.isAudible {
-                TabAudioBadge()
-            }
             if isShownElsewhere {
                 TabShownElsewhereBadge()
             }
-            // The tab waits for the user's answer to a prompt, shown or not. It follows the title, as the audio badge does, so the close button's slot does not move it.
+            // The tab waits for the user's answer to a prompt, shown or not. It follows the title, so the close button's slot does not move it.
             TabPromptIndicator(prompts: session.prompts, tabID: tab.id)
             Spacer(minLength: 0)
             // Show the close button under the pointer, after a back button while a pinned tab is off its saved site (bookmark rule 3); a pinned tab's close button unloads it and shows only while it has its page (bookmark rule 4). Otherwise, holding Command shows the row's ⌘-number shortcut in its place, and an unread tab shows a dot there.
@@ -78,21 +90,44 @@ struct TabRowView: View {
         .padding(.leading, 10)
         .padding(.trailing, 6)
         .frame(height: 36)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(fill))
-        // Only the light appearance lifts the selected row; in the dark one its lighter fill is enough.
-        .shadow(color: .black.opacity(isSelected && colorScheme == .light ? 0.08 : 0), radius: 1.5, y: 0.5)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous).fill(fill)
+                // Keep the outer shadow on the backing alone, so the bars do not cast shadows.
+                .shadow(color: .black.opacity(isSelected && colorScheme == .light ? 0.08 : 0), radius: 1.5, y: 0.5)
+                .overlay {
+                    TabPlaybackWaveform(tab: tab, isEnabled: isSelected)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                // Without a measured spectrum, notes rise from behind the icon instead, kept inside the row.
+                .overlay {
+                    // The icon's center: the row's 10-point leading padding and half the 18-point icon.
+                    TabPlaybackNotes(tab: tab, isEnabled: isSelected, iconCenterX: 19, cornerRadius: 12)
+                }
+        }
         .contentShape(Rectangle())
         // The row truncates long titles, so the tooltip has the whole title and the address.
         .help(([tab.shownTitle] + [tab.url?.absoluteString].compactMap { $0 }).joined(separator: "\n"))
-        .onTapGesture { windowModel.selectTab(tab.id) }
+        .onTapGesture(coordinateSpace: .named(BrowserWindowView.coordinateSpace)) { location in
+            if !audioButtonFrame.contains(location) { windowModel.selectTab(tab.id) }
+        }
         // The first click selects the tab at once; the second starts renaming it.
-        .simultaneousGesture(TapGesture(count: 2).onEnded { windowModel.renamingTabID = tab.id })
+        .simultaneousGesture(SpatialTapGesture(count: 2, coordinateSpace: .named(BrowserWindowView.coordinateSpace)).onEnded { value in
+            if !audioButtonFrame.contains(value.location) { windowModel.renamingTabID = tab.id }
+        })
+        .onPreferenceChange(TabAudioButtonFramesKey.self) { audioButtonFrame = $0[tab.id] ?? .zero }
         .onHover { isHovering = $0 }
         .contextMenu { menuItems }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         // A tap gesture alone does not answer the accessibility press, so VoiceOver could not select the tab.
         .accessibilityAction { windowModel.selectTab(tab.id) }
+        .accessibilityActions {
+            if (tab.isAudible || tab.isAudioMuted) && tab.canSetAudioMuted {
+                Button(tab.isAudioMuted ? localized("Unmute Tab") : localized("Mute Tab")) {
+                    if tab.canSetAudioMuted { tab.setAudioMuted(!tab.isAudioMuted) }
+                }
+            }
+        }
     }
 
     /// The tab's menu.
@@ -241,13 +276,25 @@ struct TabShortcutBadge: View {
     }
 }
 
-/// A speaker after a tab's title while its page plays sound.
+/// The audio control's measured hit area also excludes tab selection and dragging.
+struct TabAudioButtonFramesKey: PreferenceKey {
+    static let defaultValue: [UUID: CGRect] = [:]
+
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue()) { $1 }
+    }
+}
+
+/// A passive speaker in the lifted row, matching its audio control.
 struct TabAudioBadge: View {
+    var isMuted = false
+
     var body: some View {
-        Image(systemName: "speaker.wave.2.fill")
-            .font(.system(size: 10))
+        Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+            .font(.system(size: 10, weight: .bold))
             .foregroundStyle(.secondary)
-            .accessibilityLabel(localized("Playing Audio"))
+            .frame(width: 22, height: 22)
+            .accessibilityHidden(true)
     }
 }
 

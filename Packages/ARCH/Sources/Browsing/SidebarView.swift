@@ -67,6 +67,12 @@ struct SidebarView: View {
     @State private var swipeFeedback = SidebarHoverDelay<Bool>()
     /// Set while a swipe moves the library instead of the space pages.
     @State private var isSwipingLibrary = false
+    @State private var headerHeight: CGFloat = 0
+
+    /// Reserve the measured header, a space-content region, and the bottom controls within the parent's allocation.
+    private func mediaHeightLimit(in availableHeight: CGFloat) -> CGFloat {
+        max(0, availableHeight - headerHeight - 36 - 6 - SidebarBottomBar.height - Self.bottomMargin - 4 * Self.rowSpacing)
+    }
 
     private var currentIndex: Int {
         session.spaces.firstIndex { $0.id == windowModel.currentSpaceID } ?? 0
@@ -127,34 +133,47 @@ struct SidebarView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Self.rowSpacing) {
-            // Swipes over the bottom bar stay with it, so its symbols can scroll when there are many.
+        GeometryReader { geometry in
             VStack(alignment: .leading, spacing: Self.rowSpacing) {
-                if let tab = windowModel.selectedTab {
-                    SelectedTabHeaderView(session: session, tab: tab, windowButtons: windowButtons)
-                } else {
-                    // Without a tab the controls stay in place; the address pill opens a new tab.
-                    SidebarTopRow(windowButtons: windowButtons)
-                    AddressPillView(session: session, tab: nil)
+                // Swipes over the bottom bar stay with it, so its symbols can scroll when there are many.
+                VStack(alignment: .leading, spacing: Self.rowSpacing) {
+                    VStack(alignment: .leading, spacing: Self.rowSpacing) {
+                        if let tab = windowModel.selectedTab {
+                            SelectedTabHeaderView(session: session, tab: tab, windowButtons: windowButtons)
+                        } else {
+                            // Without a tab the controls stay in place; the address pill opens a new tab.
+                            SidebarTopRow(windowButtons: windowButtons)
+                            AddressPillView(session: session, tab: nil)
+                        }
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
+                    .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { headerHeight = $0 }
+                    if windowModel.isPrivate {
+                        privateTabs
+                    } else {
+                        // Persona groups and their space pages reach the sidebar's edges.
+                        SidebarSpaceContent(session: session, translation: swipeTranslation)
+                            .frame(minHeight: 0, maxHeight: .infinity, alignment: .top)
+                            .padding(.top, 6)
+                            .clipped()
+                            .padding(.horizontal, -Self.inset)
+                            .modifier(SidebarDropTarget())
+                    }
                 }
-                if windowModel.isPrivate {
-                    privateTabs
-                } else {
-                    // Persona groups and their space pages reach the sidebar's edges.
-                    SidebarSpaceContent(session: session, translation: swipeTranslation)
-                        .frame(maxHeight: .infinity, alignment: .top)
-                        .padding(.top, 6)
-                        .clipped()
-                        .padding(.horizontal, -Self.inset)
-                        .modifier(SidebarDropTarget())
+                .frame(minHeight: 0, maxHeight: .infinity, alignment: .top)
+                // The swipe area reaches the sidebar's edges and the gap above the bar. Disable it when the library pushes the sidebar aside, as it then extends over the page.
+                .background(SpaceSwipeView(isEnabled: !windowModel.isPrivate && !windowModel.isLibraryVisible, onChange: swipeChanged, onEnd: swipeEnded).padding(.horizontal, -Self.inset).padding(.bottom, -Self.rowSpacing))
+                if !windowModel.isPrivate {
+                    if let nowPlaying = session.nowPlaying {
+                        SidebarMediaStackView(session: session, nowPlaying: nowPlaying, maximumHeight: mediaHeightLimit(in: geometry.size.height))
+                    }
+                    SidebarBottomBar(session: session)
                 }
             }
-            // The swipe area reaches the sidebar's edges and the gap above the bar. Disable it when the library pushes the sidebar aside, as it then extends over the page.
-            .background(SpaceSwipeView(isEnabled: !windowModel.isPrivate && !windowModel.isLibraryVisible, onChange: swipeChanged, onEnd: swipeEnded).padding(.horizontal, -Self.inset).padding(.bottom, -Self.rowSpacing))
-            if !windowModel.isPrivate { SidebarBottomBar(session: session) }
+            .padding(.horizontal, Self.inset)
+            .padding(.bottom, Self.bottomMargin)
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         }
-        .padding(.horizontal, Self.inset)
-        .padding(.bottom, Self.bottomMargin)
         .contextMenu {
             if !windowModel.isPrivate { RemoteTabsToggle(session: session) }
         }

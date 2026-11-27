@@ -5,6 +5,7 @@ import SwiftUI
 struct FindBarView: View {
     @EnvironmentObject private var windowModel: BrowserWindowModel
     @FocusState private var isFocused: Bool
+    @State private var minimumFieldWidth: CGFloat = 0
 
     private var resultLabel: String {
         guard !windowModel.findText.isEmpty, let result = windowModel.findResult else { return "" }
@@ -20,6 +21,17 @@ struct FindBarView: View {
             TextField(localized("Find in page"), text: $windowModel.findText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
+                .frame(minWidth: minimumFieldWidth)
+                .background {
+                    // Reserve the placeholder's natural width without duplicating the input field.
+                    Text(localized("Find in page"))
+                        .font(.system(size: 13))
+                        .fixedSize()
+                        .hidden()
+                        .accessibilityHidden(true)
+                        .allowsHitTesting(false)
+                        .onGeometryChange(for: CGFloat.self) { ceil($0.size.width) } action: { minimumFieldWidth = $0 }
+                }
                 .focused($isFocused)
                 .reportsFocus(of: .find, isFocused: isFocused)
                 .onSubmit {
@@ -38,8 +50,14 @@ struct FindBarView: View {
             SidebarIconButton(symbol: "xmark", label: localized("Close Find Bar"), action: windowModel.hideFindBar)
         }
         .padding(.horizontal, 12)
-        // The question popover's width, or less in a narrow pane.
-        .frame(maxWidth: 380)
+        .background(GeometryReader { geometry in
+            Color.clear.preference(key: FindBarRequiredWidthKey.self, value: FindBarWidthMeasurement(content: geometry.size.width))
+        })
+        // Accept the pane's proposed width even when the unchanged controls need more room.
+        .frame(minWidth: 0, maxWidth: 380)
+        .background(GeometryReader { geometry in
+            Color.clear.preference(key: FindBarRequiredWidthKey.self, value: FindBarWidthMeasurement(offered: geometry.size.width))
+        })
         .frame(height: 40)
         // A solid background: a material over the engine's view cannot sample it, which leaves the label and buttons nearly invisible.
         .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -47,5 +65,23 @@ struct FindBarView: View {
         .shadow(color: .black.opacity(0.2), radius: 12, y: 4)
         .onAppear { DispatchQueue.main.async { isFocused = true } }
         .onChange(of: windowModel.findBarFocusRequests) { isFocused = true }
+    }
+}
+
+/// Reports actual overflow of the live bar, without creating a second search field.
+struct FindBarWidthMeasurement: Equatable {
+    var content: CGFloat = 0
+    var offered: CGFloat = 0
+
+    var requiredWidth: CGFloat { content > offered + 0.5 ? ceil(content) : 0 }
+}
+
+struct FindBarRequiredWidthKey: PreferenceKey {
+    static let defaultValue = FindBarWidthMeasurement()
+
+    static func reduce(value: inout FindBarWidthMeasurement, nextValue: () -> FindBarWidthMeasurement) {
+        let next = nextValue()
+        value.content = max(value.content, next.content)
+        value.offered = max(value.offered, next.offered)
     }
 }

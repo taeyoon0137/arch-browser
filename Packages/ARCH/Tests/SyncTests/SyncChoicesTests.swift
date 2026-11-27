@@ -172,7 +172,8 @@ import Testing
             return result
         }
         func waitUntil(_ condition: () -> Bool) async {
-            let deadline = ContinuousClock.now + .seconds(3)
+            // Generous, since the full parallel run can hold the main actor for seconds; a met condition returns at once.
+            let deadline = ContinuousClock.now + .seconds(30)
             while !condition() && ContinuousClock.now < deadline { try? await Task.sleep(for: .milliseconds(5)) }
         }
         func clean() {

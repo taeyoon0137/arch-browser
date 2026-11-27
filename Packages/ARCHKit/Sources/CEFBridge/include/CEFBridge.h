@@ -409,6 +409,8 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)cefBrowserDidChangeFullscreen:(BOOL)isFullscreen;
 /// Reports whether any frame's media elements play sound that is not muted.
 - (void)cefBrowserDidChangeAudible:(BOOL)isAudible;
+/// Main-thread measured frequency levels, 24 bytes from low to high frequency; empty data clears them.
+- (void)cefBrowserDidChangeAudioSpectrum:(NSData *)bands;
 /// Reports whether the page uses a video source, such as the camera, and an audio source, such as the microphone, whenever either changes (CEF's `OnMediaAccessChange`).
 - (void)cefBrowserDidChangeMediaAccessWithVideo:(BOOL)hasVideoAccess audio:(BOOL)hasAudioAccess NS_SWIFT_NAME(cefBrowserDidChangeMediaAccess(video:audio:));
 /// Reports a frame's media whenever it changes: the dictionary the media script writes, or nil once the frame has no media that played sound or its document went away.
@@ -496,6 +498,12 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 @property (nonatomic, readonly, copy) NSString *title;
 /// Chromium's zoom level: 0 is the default size; each level scales the page by 1.2.
 @property (nonatomic) double zoomLevel;
+/// Mutes this browser's output without changing its pages' media-element state. Kept while CEF creates the browser.
+@property (nonatomic) BOOL audioMuted;
+/// Whether this framework provides a passive audio observer that preserves the page's output.
+@property (nonatomic, readonly) BOOL canObserveAudioSpectrum;
+/// Measures audio only while a visible interface observes it. No effect on frameworks without support.
+@property (nonatomic) BOOL audioSpectrumEnabled;
 - (void)loadURL:(NSString *)url;
 - (void)reload;
 - (void)reloadIgnoringCache;

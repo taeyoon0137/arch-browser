@@ -49,9 +49,14 @@ final class UnloadedWebContents: EngineWebContents {
         self.init(url: record.url, title: record.title, engine: record.engine ?? defaultEngine, state: record.state)
     }
 
-    /// Finds the saved page's declared site icon without creating an engine page or sending cookies (`FaviconLoader`).
-    func loadSiteIcon() {
+    /// Shows `stored`, the icon a page of the site showed before (`SiteIconStore`), or else finds the saved page's declared site icon without creating an engine page or sending cookies (`FaviconLoader`).
+    func loadSiteIcon(stored: NSImage? = nil) {
         guard let pageURL = url else { return }
+        if let stored {
+            favicon = stored
+            uiDelegate?.webContentsDidChangeFavicon(self)
+            return
+        }
         FaviconLoader.loadPageIcon(for: pageURL) { [weak self] image in
             guard let self, let image, self.url == pageURL else { return }
             self.favicon = image

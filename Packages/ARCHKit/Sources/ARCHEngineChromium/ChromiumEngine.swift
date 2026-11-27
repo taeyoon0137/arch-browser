@@ -387,7 +387,22 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     public private(set) var favicon: NSImage?
     /// CEF cannot fill a back-forward list, so a restored tab only loads its last address.
     public var restorableState: Data? { nil }
-    public private(set) var isAudible = false
+    private var hasAudibleMedia = false
+    public var isAudible: Bool { hasAudibleMedia && !isAudioMuted }
+    public var canSetAudioMuted: Bool { browser != nil }
+    public var isAudioMuted: Bool { browser?.audioMuted ?? false }
+    public var audioSpectrum: (any EngineAudioSpectrum)? {
+        browser?.canObserveAudioSpectrum == true ? chromiumAudioSpectrum : nil
+    }
+    private lazy var chromiumAudioSpectrum = ChromiumAudioSpectrum { [weak self] enabled in
+        self?.browser?.audioSpectrumEnabled = enabled
+    }
+    @discardableResult public func setAudioMuted(_ muted: Bool) -> Bool {
+        guard let browser else { return false }
+        browser.audioMuted = muted
+        uiDelegate?.webContentsDidChangeAudibleState(self)
+        return true
+    }
     /// Follows CEF's reports of the page's video and audio sources, which cover the camera and the microphone.
     public private(set) var isCapturingMedia = false
     /// From the engine's start of picture in picture until AVKit has finished stopping it.
@@ -769,6 +784,7 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
     }
     public func cefBrowserDidClose() {
         contextMenu?.cancelTracking()
+        chromiumAudioSpectrum.close()
         uiDelegate?.webContentsDidClose(self)
     }
 
@@ -1000,8 +1016,11 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         // A queued departure may run after detachment. Reuse this existing playback event to
         // keep its native coordinate transform; this reads no DOM, forces no layout and captures no frames.
         if isAudible { rememberPictureInPictureViewport() }
-        self.isAudible = isAudible
+        hasAudibleMedia = isAudible
         uiDelegate?.webContentsDidChangeAudibleState(self)
+    }
+    public func cefBrowserDidChangeAudioSpectrum(_ bands: Data) {
+        chromiumAudioSpectrum.receive(bands)
     }
     public func cefBrowserDidChangeMedia(_ media: [String: Any]?, frame: String) {
         chromiumMediaSession.update(document: frame, report: media)

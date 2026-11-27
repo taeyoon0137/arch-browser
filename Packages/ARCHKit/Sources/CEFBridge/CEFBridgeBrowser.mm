@@ -26,6 +26,7 @@
 #include "include/cef_request_handler.h"
 #include "include/cef_resource_request_handler.h"
 #include "include/cef_values.h"
+#include "CEFBridgeAudioSpectrum.h"
 
 using namespace cef_bridge;
 
@@ -332,6 +333,8 @@ CefRefPtr<CefListValue> PageScriptList(NSArray<ARCHCEFPageScript *> *scripts) {
 - (void)handleFullscreen:(BOOL)isFullscreen;
 - (void)handleActivate;
 - (void)handleAudible:(BOOL)isAudible frame:(NSString *)frameIdentifier;
+- (void)resetAudioSpectrum;
+- (void)handleAudioSpectrum:(NSData *)bands generation:(NSUInteger)generation;
 - (void)handleMedia:(NSString *)json frame:(NSString *)frameIdentifier;
 - (void)handleScriptReply:(int)request succeeded:(BOOL)succeeded result:(nullable NSString *)result;
 - (void)handlePageScriptMessage:(CefRefPtr<CefListValue>)arguments frame:(CefRefPtr<CefFrame>)frame;
@@ -1058,6 +1061,13 @@ private:
     BOOL _mainFrameNavigationPending;
     /// The frames whose media elements play sound.
     NSMutableSet<NSString *> *_audibleFrames;
+    /// The requested output mute state, including before CEF creates this browser.
+    BOOL _audioMuted;
+    BOOL _audioSpectrumEnabled;
+    /// Keep observation demand while a crashed renderer waits for a new document.
+    BOOL _audioSpectrumRendererTerminated;
+    NSUInteger _audioSpectrumGeneration;
+    CefRefPtr<AudioSpectrumObserver> _audioSpectrumObserver;
     /// The completions of script requests whose replies have not come yet, by request number.
     NSMutableDictionary<NSNumber *, void (^)(BOOL, NSString *_Nullable)> *_scriptReplies;
     int _lastScriptRequest;
@@ -1154,6 +1164,7 @@ private:
 }
 
 - (void)dealloc {
+    if (_audioSpectrumObserver) { _audioSpectrumObserver->Stop(); }
     [self finishContextMenu];
     [self finishScriptRequests];
     [self finishCaptures];
@@ -1183,6 +1194,11 @@ private:
     // A popup's entry, or for a browser from `CreateBrowser` its place in `gBrowsersInTransition`, keeps this object alive until the method returns; from then on its delegate keeps it, or the block below until it closes the browser.
     std::optional<PendingPopup> popup = TakePendingPopup(self);
     _browser = browser;
+    if (_audioMuted) { browser->GetHost()->SetAudioMuted(true); }
+    if (_audioSpectrumEnabled) {
+        _audioSpectrumEnabled = NO;
+        self.audioSpectrumEnabled = YES;
+    }
     NSView *view = CAST_CEF_WINDOW_HANDLE_TO_NSVIEW(browser->GetHost()->GetWindowHandle());
     view.frame = _parentView.bounds;
     view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
@@ -1242,6 +1258,62 @@ private:
 
 - (void)handleActivate {
     [_delegate cefBrowserDidRequestActivation];
+}
+
+- (BOOL)audioMuted {
+    return _browser ? _browser->GetHost()->IsAudioMuted() : _audioMuted;
+}
+
+- (BOOL)canObserveAudioSpectrum {
+#if defined(ARCH_CEF_AUDIO_OBSERVER_API)
+    return YES;
+#else
+    return NO;
+#endif
+}
+
+- (BOOL)audioSpectrumEnabled { return _audioSpectrumEnabled; }
+
+- (void)resetAudioSpectrum {
+    ++_audioSpectrumGeneration;
+    if (_audioSpectrumObserver) { _audioSpectrumObserver->Stop(); }
+#if defined(ARCH_CEF_AUDIO_OBSERVER_API)
+    if (_browser) { _browser->GetHost()->SetAudioObserver(nullptr); }
+#endif
+    _audioSpectrumObserver = nullptr;
+    [_delegate cefBrowserDidChangeAudioSpectrum:NSData.data];
+}
+
+- (void)setAudioSpectrumEnabled:(BOOL)enabled {
+    enabled = enabled && self.canObserveAudioSpectrum && !_closeRequested;
+    if (_audioSpectrumEnabled == enabled) { return; }
+    _audioSpectrumEnabled = enabled;
+    [self resetAudioSpectrum];
+    if (!enabled || _audioSpectrumRendererTerminated || !_browser) { return; }
+#if defined(ARCH_CEF_AUDIO_OBSERVER_API)
+    __weak ARCHCEFBrowser *weakSelf = self;
+    const NSUInteger generation = _audioSpectrumGeneration;
+    _audioSpectrumObserver = new AudioSpectrumObserver(^(NSData *bands) {
+        [weakSelf handleAudioSpectrum:bands generation:generation];
+    });
+    if (!_browser->GetHost()->SetAudioObserver(_audioSpectrumObserver)) {
+        _audioSpectrumObserver->Stop();
+        _audioSpectrumObserver = nullptr;
+        _audioSpectrumEnabled = NO;
+        [_delegate cefBrowserDidChangeAudioSpectrum:NSData.data];
+    }
+#endif
+}
+
+- (void)handleAudioSpectrum:(NSData *)bands generation:(NSUInteger)generation {
+    if (_audioSpectrumEnabled && !_closeRequested && generation == _audioSpectrumGeneration) {
+        [_delegate cefBrowserDidChangeAudioSpectrum:bands];
+    }
+}
+
+- (void)setAudioMuted:(BOOL)muted {
+    _audioMuted = muted;
+    if (_browser) { _browser->GetHost()->SetAudioMuted(muted); }
 }
 
 - (void)handleAudible:(BOOL)isAudible frame:(NSString *)frameIdentifier {
@@ -1321,6 +1393,12 @@ private:
 }
 
 - (void)handleDocumentCommit:(NSString *)url {
+    _audioSpectrumRendererTerminated = NO;
+    if (_audioSpectrumEnabled) {
+        // A new document gets fresh FFT buffers; queued samples from the old one are discarded.
+        _audioSpectrumEnabled = NO;
+        self.audioSpectrumEnabled = YES;
+    }
     [_delegate cefBrowserDidCommitDocument:url];
 }
 
@@ -1480,6 +1558,10 @@ private:
 - (void)handleBeforeClose {
     // The delegate's close handler can release the last reference to this object, as for a page that closed itself, which nothing put in `gBrowsersInTransition`, and the client reaches the object without retaining it. This reference keeps it until the method returns.
     ARCHCEFBrowser *keepAlive __attribute__((objc_precise_lifetime)) = self;
+    _audioSpectrumEnabled = NO;
+    ++_audioSpectrumGeneration;
+    if (_audioSpectrumObserver) { _audioSpectrumObserver->Stop(); }
+    _audioSpectrumObserver = nullptr;
     [self finishContextMenu];
     [self finishScriptRequests];
     ExtensionsBrowserWillClose(self);
@@ -1558,6 +1640,9 @@ private:
 }
 
 - (void)handleRenderProcessTerminated {
+    // Stop stale PCM without losing visible subscribers' demand. The next document restarts it.
+    _audioSpectrumRendererTerminated = YES;
+    [self resetAudioSpectrum];
     // A page whose process quit plays nothing, and its frames never report again.
     if (_audibleFrames.count > 0) {
         [_audibleFrames removeAllObjects];
@@ -2279,6 +2364,7 @@ static CefMouseEvent InputMouseEvent(NSPoint point, uint32_t flags) {
 
 // Before CEF has created the browser, the request waits for `OnAfterCreated`.
 - (void)close {
+    self.audioSpectrumEnabled = NO;
     _closeRequested = YES;
     if (_browser) {
         [gBrowsersInTransition addObject:self];
